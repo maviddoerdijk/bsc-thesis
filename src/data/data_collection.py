@@ -22,7 +22,8 @@ def gather_data(startDateStr, endDateStr, instrumentIds):
         'open': data_open,
         'high': data_high,
         'low': data_low,
-        'vol': data_vol
+        'vol': data_vol,
+        'yfinance_formatted': data
     }
     
 if __name__ == "__main__":
