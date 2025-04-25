@@ -9,6 +9,22 @@ from preprocessing.wavelet_denoising import wav_den
 from typing import Callable, Dict, Any, Optional, Tuple, Sequence, Union
 
 
+def create_dataset(mat: np.ndarray, scaler: MinMaxScaler = MinMaxScaler(feature_range=(0, 1)), look_back: int = 1
+                    ) -> Tuple[np.ndarray, np.ndarray,
+                                np.ndarray, np.ndarray]:
+    """
+    Return  (raw_X, scaled_X, raw_Y, scaled_Y),
+    where Y is a 1-step shift of X[:,0].
+    """ 
+    dataX, dataY = [], []
+    for i in range(len(mat) - look_back):
+        dataX.append(mat[i, :])
+        dataY.append(mat[(i + 1):(i + 1 + look_back), 0])
+    return (dataX,
+            scaler.fit_transform(dataX),
+            dataY,
+            scaler.fit_transform(dataY))
+
 def default_normalize(series: pd.Series) -> pd.Series:
     # z-score normalization
     return (series - series.mean()) / series.std(ddof=0)
@@ -134,28 +150,11 @@ def execute_kalman_workflow(
     if denoise_fn is not None: # denoise using wavelet denoising
         train = pd.DataFrame({col: denoise_fn(train[col]) for col in keep_cols})
         
-    scaler_x = scaler_factory(**scaler_kwargs)
-    scaler_y = scaler_factory(**scaler_kwargs)
-    
-    def create_dataset(mat: np.ndarray
-                       ) -> Tuple[np.ndarray, np.ndarray,
-                                  np.ndarray, np.ndarray]:
-        """
-        Return  (raw_X, scaled_X, raw_Y, scaled_Y),
-        where Y is a 1-step shift of X[:,0].
-        """
-        dataX, dataY = [], []
-        for i in range(len(mat) - look_back):
-            dataX.append(mat[i, :])
-            dataY.append(mat[(i + 1):(i + 1 + look_back), 0])
-        return (dataX,
-                scaler_x.fit_transform(dataX),
-                dataY,
-                scaler_y.fit_transform(dataY))
         
-    trainX_untr, trainX, trainY_untr, trainY = create_dataset(train.values)
-    devX_untr,   devX,   devY_untr,   devY   = create_dataset(dev.values)
-    testX_untr,  testX,  testY_untr,  testY  = create_dataset(test.values)
+    scaler = scaler_factory(**scaler_kwargs)
+    trainX_untr, trainX, trainY_untr, trainY = create_dataset(train.values, scaler=scaler, look_back=look_back)
+    devX_untr,   devX,   devY_untr,   devY   = create_dataset(dev.values,  scaler=scaler, look_back=look_back)
+    testX_untr,  testX,  testY_untr,  testY  = create_dataset(test.values, scaler=scaler, look_back=look_back)
 
     # get beta_t, the Kalman-filtered regression coefficients 
     beta_t = kalman_filter_regression(
