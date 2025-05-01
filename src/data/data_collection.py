@@ -16,6 +16,9 @@ def gather_data(startDateStr, endDateStr, instrumentIds):
     data_high = pd.DataFrame({ticker: data[ticker]['High'] for ticker in instrumentIds if ticker in data.columns.levels[0]})
     data_low = pd.DataFrame({ticker: data[ticker]['Low'] for ticker in instrumentIds if ticker in data.columns.levels[0]})
     data_vol = pd.DataFrame({ticker: data[ticker]['Volume'] for ticker in instrumentIds if ticker in data.columns.levels[0]})
+    # TODO: some bugs are still happening when downloading data in high volumes
+    # reproducable issue: https://github.com/ivelin/canswim/issues/65
+    # possible solution: https://yfinance-python.org/advanced/caching.html (`pip install yfinance[nospam]`)
     
     return {
         'close': data_close,

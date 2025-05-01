@@ -12,3 +12,11 @@ The original code can be found here: https://github.com/sk3391/CS230/blob/master
 ## train_transformer.ipynb
 
 Go through this file to understand more about the thought process behind specific choices made when training the Transformer. It uses many of the modules.
+
+## train_transformer_correct.ipynb
+
+In this file, you can see specific steps that were taken to find out how the problem of using future data in z-score can be fixed.
+
+## plot_styleguide.ipynb
+
+Was originally meant as a styleguide, but for now merely using `plt.style.use('seaborn-v0_8')` is good enough. Any future experimentations with plots will be done in this notebook.
