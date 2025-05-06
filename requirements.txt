@@ -2,3 +2,4 @@ PyWavelets==1.8.0
 pykalman==0.10.1
 prophet==1.1.6
 ta==0.11.0
+curl-cffi==0.10.0

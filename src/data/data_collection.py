@@ -1,24 +1,24 @@
 import pandas as pd
 import yfinance as yf
+from curl_cffi import requests
 
 
 def gather_data(startDateStr, endDateStr, instrumentIds):
+    session = requests.Session(impersonate="chrome") # custom fix for rate limiting, based on issue: https://github.com/ranaroussi/yfinance/issues/2422
     data = yf.download(
         tickers=instrumentIds,
         start=startDateStr,
         end=endDateStr,
         group_by='ticker',
         auto_adjust=False,
-        threads=True
+        threads=True,
+        session=session
     )
     data_close = pd.DataFrame({ticker: data[ticker]['Close'] for ticker in instrumentIds if ticker in data.columns.levels[0]})
     data_open = pd.DataFrame({ticker: data[ticker]['Open'] for ticker in instrumentIds if ticker in data.columns.levels[0]})
     data_high = pd.DataFrame({ticker: data[ticker]['High'] for ticker in instrumentIds if ticker in data.columns.levels[0]})
     data_low = pd.DataFrame({ticker: data[ticker]['Low'] for ticker in instrumentIds if ticker in data.columns.levels[0]})
     data_vol = pd.DataFrame({ticker: data[ticker]['Volume'] for ticker in instrumentIds if ticker in data.columns.levels[0]})
-    # TODO: some bugs are still happening when downloading data in high volumes
-    # reproducable issue: https://github.com/ivelin/canswim/issues/65
-    # possible solution: https://yfinance-python.org/advanced/caching.html (`pip install yfinance[nospam]`)
     
     return {
         'close': data_close,
