@@ -17,6 +17,10 @@ Go through this file to understand more about the thought process behind specifi
 
 In this file, you can see specific steps that were taken to find out how the problem of using future data in z-score can be fixed.
 
+## train_kalman_filter.ipynb
+
+See more in detail the thought process and results for Kalman Filters.
+
 ## plot_styleguide.ipynb
 
 Was originally meant as a styleguide, but for now merely using `plt.style.use('seaborn-v0_8')` is good enough. Any future experimentations with plots will be done in this notebook.
