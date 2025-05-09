@@ -4,6 +4,13 @@ from curl_cffi import requests
 
 
 def gather_data(startDateStr, endDateStr, instrumentIds):
+    """
+    IMPORTANT - Rate limits are as follows (approximately, these are from outdated docs):
+    GET Requests Per Minute; 60
+    GET Requests Per Hour; 360
+    GET Requests Per Day; 8000
+    Source: https://help.yahooinc.com/dsp-api/docs/rate-limits
+    """
     session = requests.Session(impersonate="chrome") # custom fix for rate limiting, based on issue: https://github.com/ranaroussi/yfinance/issues/2422
     data = yf.download(
         tickers=instrumentIds,
@@ -55,8 +62,7 @@ if __name__ == "__main__":
                     'XHB', 'VCR','XLP', 'IYK', 'VDC',
                     'XLE', 'IYE', 'IGE',
                     'VDE', 'QCLN', 'XLF','IYF', 'KBE',
-                    'KRE', 'VFH']))
-    
+                    'KRE', 'VFH']))[:10]
     
     data = gather_data(startDateStr, endDateStr, instrumentIds)
     data_close = data['close']

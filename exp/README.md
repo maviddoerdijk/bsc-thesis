@@ -24,3 +24,11 @@ See more in detail the thought process and results for Kalman Filters.
 ## plot_styleguide.ipynb
 
 Was originally meant as a styleguide, but for now merely using `plt.style.use('seaborn-v0_8')` is good enough. Any future experimentations with plots will be done in this notebook.
+
+## gather_data.ipynb
+
+Often, I came across the problem of having to scrape the yfinance data for a large set of ETFs every time I started programming. This notebook solves that problem by helping me in caching all the scraped data. If you want to save any specific new dataset, simply use the gather_data.ipynb with your wanted params.
+
+## train_time_moe.ipynb
+
+Technically this is used for finetuning a pre-trained model, but the name train_ was used to keep in line with existing naming conventions for other notebooks.
