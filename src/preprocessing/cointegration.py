@@ -1,6 +1,7 @@
 import numpy as np
 from statsmodels.tsa.stattools import coint
 from statsmodels.tsa.stattools import MissingDataError
+from tqdm import tqdm
 
 def find_cointegrated_pairs(data, target_col='Close'):
     """
@@ -53,26 +54,52 @@ def find_cointegrated_pairs(data, target_col='Close'):
     # loop through all possible pairs of tickers
     keys = list(tickers)
     visited = 0
-    for i in range(len(keys)):
-        for j in range(i+1, len(keys)):
-            visited += 1
-            S1 = data[keys[i]][target_col]
-            S2 = data[keys[j]][target_col]
-            try:
-                result = coint(S1, S2)
-            except MissingDataError:
-                print(f"Missing data for pair: {keys[i]}, {keys[j]}")
-                continue
-            score = result[0]
-            pvalue = result[1]
-            score_matrix[i, j] = score
-            pvalue_matrix[i, j] = pvalue
-            if pvalue < 0.05:
-                pairs[(keys[i], keys[j])] = result
-    print(f"Completed {visited} pairs")
-    return score_matrix, pvalue_matrix, pairs
+    total_pairs = len(keys) * (len(keys) - 1) // 2
+    with tqdm(total=total_pairs, desc="Processing pairs") as pbar:
+        for i in range(len(keys)):
+            for j in range(i+1, len(keys)):
+                visited += 1
+                S1 = data[keys[i]][target_col]
+                S2 = data[keys[j]][target_col]
+                try:
+                    result = coint(S1, S2)
+                except MissingDataError:
+                    print(f"Missing data for pair: {keys[i]}, {keys[j]}")
+                    pbar.update(1)
+                    continue
+                score = result[0]
+                pvalue = result[1]
+                score_matrix[i, j] = score
+                pvalue_matrix[i, j] = pvalue
+                if pvalue < 0.05:
+                    pairs[(keys[i], keys[j])] = result
+                pbar.update(1)
+        print(f"Completed {visited} pairs")
+        return score_matrix, pvalue_matrix, pairs
 
 
 def find_cointegrated_pairs2(data):
     print('poep')
     return None, None, None
+
+if __name__ == "__main__":
+    import pandas as pd
+    # Example data
+    data = pd.DataFrame({
+        ('A', 'Close'): [1, 2, 3, 4, 5],
+        ('B', 'Close'): [2, 4, 6, 8, 10],
+        ('C', 'Close'): [5, 6, 7, 8, 9],
+        ('D', 'Close'): [10, 9, 8, 7, 6]
+    })
+    data.columns = pd.MultiIndex.from_tuples(data.columns, names=["Ticker", "Attribute"])
+
+    # Run the function
+    score_matrix, pvalue_matrix, pairs = find_cointegrated_pairs(data, target_col='Close')
+
+    # Print results
+    print("Score Matrix:")
+    print(score_matrix)
+    print("\nP-Value Matrix:")
+    print(pvalue_matrix)
+    print("\nCointegrated Pairs:")
+    print(pairs)
