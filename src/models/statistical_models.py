@@ -251,7 +251,14 @@ def execute_kalman_workflow(
   max_clearing = 0.70
   position_thresholds = np.linspace(min_position, max_position, num=10)
   clearing_thresholds = np.linspace(min_clearing, max_clearing, num=10)
-  yoy_mean, yoy_std = calculate_return_uncertainty(test['S1_close'], test['S2_close'], pd.Series(forecast_test, index=test.index), position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds)
+
+  test_index_shortened = test.index[:len(testY_untr)]
+  forecast_test_shortened_series = pd.Series(forecast_test[:len(testY_untr)], index=test_index_shortened)
+  testY_untr_shortened = pd.Series(testY_untr, index=test_index_shortened)
+  test_s1_shortened = test['S1_close'].iloc[:len(testY_untr)]
+  test_s2_shortened = test['S2_close'].iloc[:len(testY_untr)]
+
+  yoy_mean, yoy_std = calculate_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds)
   # calculate the strategy returns if we were to feed the groundtruth values to the `trade` func. If the ground truth returns are lower, it seems likely there is something wrong with the `trade` func (but not certain! Probability applies here).
   # forecast_test_shortened = forecast_test[:len(testY_untr)]
   # spread_pred_series = pd.Series(forecast_test_shortened, index=index_shortened)
@@ -272,7 +279,7 @@ def execute_kalman_workflow(
   result_dir = os.path.join(result_parent_dir, current_result_dir)
   if not os.path.exists(result_dir):
       os.makedirs(result_dir)
-  yoy_returns_filename = plot_return_uncertainty(test['S1_close'], test['S2_close'], pd.Series(forecast_test, index=test.index), test.index, look_back, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
+  yoy_returns_filename = plot_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, test_index_shortened, look_back, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
   predicted_vs_actual_spread_filename = plot_comparison(testY_untr, forecast_test, test.index, workflow_type="Kalman Filter", pair_tup_str=pair_tup_str, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
   plot_filenames = {
       "yoy_returns": yoy_returns_filename,
