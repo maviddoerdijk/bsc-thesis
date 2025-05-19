@@ -77,6 +77,30 @@ def kalman_filter_regression(x: pd.Series,
     state_means, _ = kf.filter(y.values)
     return state_means          # shape (T, 2)
 
+def kalman_filter_regression_multivariate(X, y, delta=1e-4, obs_cov=1e-2):
+    T, d = X.shape
+    transition_matrix = np.eye(d)
+    transition_covariance = delta * np.eye(d)
+    # initially coefficients at zero
+    initial_state_mean = np.zeros(d)
+    initial_state_covariance = 1e3 * np.eye(d)
+    observation_covariance = obs_cov
+    observation_matrices = X[:, np.newaxis, :]
+
+    kf = KalmanFilter(
+        transition_matrices=transition_matrix,
+        observation_matrices=observation_matrices,
+        initial_state_mean=initial_state_mean,
+        initial_state_covariance=initial_state_covariance,
+        transition_covariance=transition_covariance,
+        observation_covariance=obs_cov,
+        n_dim_obs=1,
+        n_dim_state=d
+    )
+
+    state_means, _ = kf.filter(y)
+    return state_means
+
 def execute_kalman_workflow(
     pair_data: pd.DataFrame,
     *,

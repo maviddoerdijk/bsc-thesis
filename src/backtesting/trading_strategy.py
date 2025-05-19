@@ -20,8 +20,11 @@ def trade(
     cash = initial_cash
     qty_s1 = 0
     qty_s2 = 0
-    returns = [initial_cash]
+    returns = [initial_cash] # note: starting with initial cash allows us to calculate the returns as a percentage of the initial cash, over a time period (YoY are not equal to QoQ for example), but it causes a problem with plotting where we extend the returns length by one. Be wary of this.
     position = 0 # 0: neutral, 1: long, -1: short
+    
+    if len(spread) != len(S1) or len(spread) != len(S2):
+        raise ValueError("Length of S1, S2, and spread must be the same")
 
     for i in range(len(spread)): # each iteration of the for loop is a new time step, in this case often a single day
         price_s1 = S1.iloc[i]

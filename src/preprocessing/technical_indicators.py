@@ -92,12 +92,12 @@ def combine_pairs_data(data_close, data_open, data_high, data_low, data_vol, tic
     df['S1_dlr'] = ta.others.daily_log_return(df['S1_close'])
     df['S2_dlr'] = ta.others.daily_log_return(df['S2_close'])
 
-    # Spreads via regression
-    alpha_c = -sm.OLS(df['S1_close'], df['S2_close']).fit().params[0]
-    alpha_o = -sm.OLS(df['S1_open'], df['S2_open']).fit().params[0]
-    alpha_h = -sm.OLS(df['S1_high'], df['S2_high']).fit().params[0]
-    alpha_l = -sm.OLS(df['S1_low'], df['S2_low']).fit().params[0]
-
+    # spreads via regression - use `.values` to avoid deprecation warnings
+    alpha_c = -sm.OLS(df['S1_close'].values, df['S2_close'].values).fit().params[0]
+    alpha_o = -sm.OLS(df['S1_open'].values, df['S2_open'].values).fit().params[0]
+    alpha_h = -sm.OLS(df['S1_high'].values, df['S2_high'].values).fit().params[0]
+    alpha_l = -sm.OLS(df['S1_low'].values, df['S2_low'].values).fit().params[0]
+    
     df['Spread_Close'] = df['S1_close'] + df['S2_close'] * alpha_c
     df['Spread_Open'] = df['S1_open'] + df['S2_open'] * alpha_o
     df['Spread_High'] = df['S1_high'] + df['S2_high'] * alpha_h
