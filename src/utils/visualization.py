@@ -40,6 +40,7 @@ def plot_return_uncertainty(S1, S2, spread_pred_series, test_index, look_back,
     filename = f"{filename_base_empty}_plot_{param_type}.png"
     filepath = os.path.join(result_dir, filename)
     plt.savefig(filepath)
+    plt.close()  # prevent automatic display in notebooks
     if verbose:
         print(f"Saved plot to {filepath}")
     return filename
@@ -62,6 +63,7 @@ def plot_comparison(y_true, y_hat, index, workflow_type="Unknown Workflow Type",
     filename = f"{filename_base_empty}_groundtruth_comparison.png"
     filepath = os.path.join(result_dir, filename)
     plt.savefig(filepath)
+    plt.close()  # prevent automatic display in notebooks
     if verbose:
         print(f"Saved plot to {filepath}")
     return filename
