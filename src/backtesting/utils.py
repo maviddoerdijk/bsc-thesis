@@ -1,6 +1,6 @@
 import numpy as np
 import itertools
-from trading_strategy import trade
+from backtesting.trading_strategy import trade
 
 def calculate_return_uncertainty(S1, S2, spread_pred_series, position_thresholds=None, clearing_thresholds=None,
                           long_windows=None, short_windows=None, return_for_plotting=False):
