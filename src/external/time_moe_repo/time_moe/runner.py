@@ -6,12 +6,12 @@ from operator import mul
 
 import torch
 
-from time_moe.datasets.time_moe_dataset import TimeMoEDataset
-from time_moe.datasets.time_moe_window_dataset import TimeMoEWindowDataset
-from time_moe.models.modeling_time_moe import TimeMoeForPrediction, TimeMoeConfig
-from time_moe.trainer.hf_trainer import TimeMoETrainingArguments, TimeMoeTrainer
-from time_moe.utils.dist_util import get_world_size
-from time_moe.utils.log_util import logger, log_in_local_rank_0
+from external.time_moe_repo.time_moe.datasets.time_moe_dataset import TimeMoEDataset
+from external.time_moe_repo.time_moe.datasets.time_moe_window_dataset import TimeMoEWindowDataset
+from external.time_moe_repo.time_moe.models.modeling_time_moe import TimeMoeForPrediction, TimeMoeConfig
+from external.time_moe_repo.time_moe.trainer.hf_trainer import TimeMoETrainingArguments, TimeMoeTrainer
+from external.time_moe_repo.time_moe.utils.dist_util import get_world_size
+from external.time_moe_repo.time_moe.utils.log_util import logger, log_in_local_rank_0
 
 
 class TimeMoeRunner:
