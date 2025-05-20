@@ -9,7 +9,7 @@ def plot_heatmap(pvalues: pd.DataFrame) -> None:
     sns.heatmap(pvalues,  cmap='RdYlGn_r', mask = (pvalues >= 0.98))
     plt.show()
     
-def plot_return_uncertainty(S1, S2, spread_pred_series, test_index, look_back,
+def plot_return_uncertainty(S1, S2, spread_pred_series, test_index, look_back, # Note: look_back is not actually used in the function
                             position_thresholds=None, clearing_thresholds=None,
                             long_windows=None, short_windows=None, verbose=False, result_dir="", filename_base="data_begindate_enddate_hash.pkl"):
     returns_array, param_type = calculate_return_uncertainty(
@@ -67,3 +67,21 @@ def plot_comparison(y_true, y_hat, index, workflow_type="Unknown Workflow Type",
     if verbose:
         print(f"Saved plot to {filepath}")
     return filename
+
+def plot_train_val_loss(train_losses, val_losses, workflow_type="Unknown Workflow Type", pair_tup_str="(?,?)", result_dir="", verbose=verbose, filename_base="data_begindate_enddate_hash.pkl"):
+  plt.figure(figsize=(10, 6))
+  plt.plot(train_losses, label="Train Loss")
+  plt.plot(val_losses, label="Val Loss")
+  plt.xlabel("Epoch")
+  plt.ylabel("Loss")
+  plt.title(f"Train and Validation Loss for {workflow_type} with pair {pair_tup_str}")
+  plt.legend()
+
+  filename_base_empty = filename_base.replace(".pkl", "")
+  filename = f"{filename_base_empty}_train_val_loss.png"
+  filepath = os.path.join(result_dir, filename)
+  plt.savefig(filepath)
+  plt.close()  # prevent automatic display in notebooks
+  if verbose:
+      print(f"Saved plot to {filepath}")
+  return filename

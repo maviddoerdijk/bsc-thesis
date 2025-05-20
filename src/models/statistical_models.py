@@ -6,13 +6,13 @@ from sklearn.metrics import mean_squared_error
 from pykalman import KalmanFilter
 import pandas as pd
 from matplotlib import pyplot as plt
-from preprocessing.wavelet_denoising import wav_den
 from typing import Callable, Dict, Any, Optional, Tuple, Sequence, Union
 
 # custom imports
 from backtesting.trading_strategy import trade
 from backtesting.utils import calculate_return_uncertainty
 from utils.visualization import plot_return_uncertainty, plot_comparison
+from preprocessing.wavelet_denoising import wav_den
 
 
 def create_dataset(mat: np.ndarray, scaler: MinMaxScaler = MinMaxScaler(feature_range=(0, 1)), look_back: int = 1
@@ -291,7 +291,7 @@ def execute_kalman_workflow(
 Validation MSE: {val_mse}
 Test MSE: {test_mse}
 YOY Returns: {yoy_mean * 100:.2f}%
-YOY Std: {yoy_std * 100:.2f}%
+YOY Std: +- {yoy_std * 100:.2f}%
 GT Yoy: {gt_yoy * 100:.2f}%
 Plot filepath parent dir: {result_parent_dir}
 Plot filenames: {plot_filenames}
@@ -307,10 +307,10 @@ Plot filenames: {plot_filenames}
       test_mse=test_mse,
       yoy_mean=yoy_mean,
       yoy_std=yoy_std,
+      gt_yoy=gt_yoy,
       result_parent_dir=result_parent_dir,
       plot_filenames=plot_filenames
   )
-
   if return_datasets:
       output.update(
           dict(train=train, dev=dev, test=test,
@@ -321,109 +321,3 @@ Plot filenames: {plot_filenames}
                 ))
       )
   return output
-
-
-# # ORIGINAL ##
-# def execute_kalman_workflow(pair_data):
-#     # --- helper functions ---
-#     def wav_den(ts_orig):
-#         ca, cd = pywt.dwt(ts_orig, 'db8')
-#         cat = pywt.threshold(ca, np.std(ca)/8, mode='soft')
-#         cdt = pywt.threshold(cd, np.std(cd)/8, mode='soft')
-#         ts_rec = pywt.idwt(cat, cdt, 'db8')
-#         return ts_rec[1:]
-
-#     def normalize(series):
-#         return (series - np.mean(series)) / np.std(series)
-
-#     def acc_metric(true_value, predicted_value):
-#         acc_met = 0.0
-#         m = len(true_value)
-#         for i in range(m):
-#             acc_met += mean_squared_error(true_value[i], predicted_value[i])
-#         return np.sqrt(acc_met / m)
-
-#     def KalmanFilterAverage(x):
-#         kf = KalmanFilter(transition_matrices=[1],
-#                           observation_matrices=[1],
-#                           initial_state_mean=0,
-#                           initial_state_covariance=1,
-#                           observation_covariance=1,
-#                           transition_covariance=0.01)
-#         state_means, _ = kf.filter(x.values)
-#         return pd.Series(state_means.flatten(), index=x.index)
-
-#     def KalmanFilterRegression(x, y):
-#         delta = 1e-3
-#         trans_cov = delta / (1 - delta) * np.eye(2)
-#         obs_mat = np.expand_dims(np.vstack([[x], [np.ones(len(x))]]).T, axis=1)
-#         kf = KalmanFilter(n_dim_obs=1, n_dim_state=2,
-#                           initial_state_mean=[0, 0],
-#                           initial_state_covariance=np.ones((2, 2)),
-#                           transition_matrices=np.eye(2),
-#                           observation_matrices=obs_mat,
-#                           observation_covariance=2,
-#                           transition_covariance=trans_cov)
-#         state_means, _ = kf.filter(y.values)
-#         return state_means
-
-#     # --- workflow ---
-
-#     look_back = 1
-#     cols = [col for col in pair_data.columns if col != 'date']  # Exclude non-feature columns if any
-
-#     lstm_pair_data = pair_data[cols].iloc[30:]
-#     train_size = int(len(lstm_pair_data) * 0.9)
-#     dev_size = int((len(lstm_pair_data) - train_size) * 0.5) - 30
-#     test_size = len(lstm_pair_data) - train_size - dev_size
-
-#     train = lstm_pair_data.iloc[:train_size]
-#     dev = lstm_pair_data.iloc[train_size:train_size + dev_size]
-#     test = lstm_pair_data.iloc[train_size + dev_size:]
-
-#     train_den = pd.DataFrame({col: wav_den(train[col]) for col in cols})
-
-#     scaler = MinMaxScaler(feature_range=(0, 1))
-
-#     def create_dataset(dataset):
-#         dataX, dataY = [], []
-#         for i in range(len(dataset) - look_back):
-#             dataX.append(dataset[i, :])
-#             dataY.append(dataset[(i+1):(i+1+look_back), 0])
-#         return dataX, scaler.fit_transform(dataX), dataY, scaler.fit_transform(dataY)
-
-#     trainX_untr, trainX, trainY_untr, trainY = create_dataset(train_den.values)
-#     devX_untr, devX, devY_untr, devY = create_dataset(dev.values)
-#     testX_untr, testX, testY_untr, testY = create_dataset(test.values)
-
-#     # Kalman
-#     state_means = - KalmanFilterRegression(
-#         KalmanFilterAverage(pair_data['S1_close']),
-#         KalmanFilterAverage(pair_data['S2_close'])
-#     )[:, 0]
-#     results = normalize(pair_data['S1_close'] + (pair_data['S2_close'] * state_means))
-#     forecast = results[-len(testX):].values
-
-#     if look_back == 1:
-#         yhat_KF_mse = [np.array([val]) for val in forecast]
-#         mse = acc_metric(normalize(testY_untr), yhat_KF_mse)
-#     else:
-#         mse = None
-
-#     # Plotting
-#     plt.figure(figsize=(15, 7))
-#     normalize(pair_data['Spread_Close']).plot(label='Spread z-score')
-#     results.plot(label='Kalman_Predicted_Spread')
-#     plt.axhline(normalize(pair_data['Spread_Close']).mean(), color='black')
-#     plt.axhline(1.0, color='red', linestyle='--')
-#     plt.axhline(-1.0, color='green', linestyle='--')
-#     plt.legend()
-#     plt.title('Kalman Filter Prediction vs Ground Truth Spread')
-#     plt.show()
-
-#     return {
-#         'mse': mse,
-#         'forecast': forecast,
-#         'state_means': state_means,
-#         'kalman_result': results
-#     }
