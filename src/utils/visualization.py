@@ -68,7 +68,7 @@ def plot_comparison(y_true, y_hat, index, workflow_type="Unknown Workflow Type",
         print(f"Saved plot to {filepath}")
     return filename
 
-def plot_train_val_loss(train_losses, val_losses, workflow_type="Unknown Workflow Type", pair_tup_str="(?,?)", result_dir="", verbose=verbose, filename_base="data_begindate_enddate_hash.pkl"):
+def plot_train_val_loss(train_losses, val_losses, workflow_type="Unknown Workflow Type", pair_tup_str="(?,?)", result_dir="", verbose=False, filename_base="data_begindate_enddate_hash.pkl"):
   plt.figure(figsize=(10, 6))
   plt.plot(train_losses, label="Train Loss")
   plt.plot(val_losses, label="Val Loss")
