@@ -28,7 +28,7 @@ def is_local_rank_0():
         return False
 
 
-def get_logger(name, level="INFO", handlers=None, update=False):
+def get_logger(name, level="WARNING", handlers=None, update=False):
     if name in _LOGGER_CACHE and not update:
         return _LOGGER_CACHE[name]
     logger = logging.getLogger(name)
