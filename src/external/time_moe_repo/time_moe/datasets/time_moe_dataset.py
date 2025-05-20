@@ -3,9 +3,9 @@
 import os
 import numpy as np
 
-from .ts_dataset import TimeSeriesDataset
-from .general_dataset import GeneralDataset
-from .binary_dataset import BinaryDataset
+from external.time_moe_repo.time_moe.datasets.ts_dataset import TimeSeriesDataset
+from external.time_moe_repo.time_moe.datasets.general_dataset import GeneralDataset
+from external.time_moe_repo.time_moe.datasets.binary_dataset import BinaryDataset
 
 
 class TimeMoEDataset(TimeSeriesDataset):

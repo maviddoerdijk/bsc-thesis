@@ -1,6 +1,6 @@
 import os
 import torch
-from time_moe.runner import TimeMoeRunner
+from external.time_moe_repo.time_moe.runner import TimeMoeRunner
 
 def train_time_moe(
     data_path,

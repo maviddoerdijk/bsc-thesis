@@ -7,7 +7,7 @@ import gzip
 import yaml
 import numpy as np
 
-from .ts_dataset import TimeSeriesDataset
+from external.time_moe_repo.time_moe.datasets.ts_dataset import TimeSeriesDataset
 
 
 class GeneralDataset(TimeSeriesDataset):
