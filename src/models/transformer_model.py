@@ -308,14 +308,17 @@ def execute_transformer_workflow(
       os.makedirs(result_dir)
 
   ### Plotting #####
+  workflow_type = "Transformer"
+  if not add_technical_indicators:
+        workflow_type = "Transformer (without ta)"
   # 1. Train val loss
-  train_val_loss_filename = plot_train_val_loss(train_losses, val_losses, workflow_type="Transformer", pair_tup_str=pair_tup_str, result_dir=result_dir, verbose=verbose, filename_base=filename_base)
+  train_val_loss_filename = plot_train_val_loss(train_losses, val_losses, workflow_type=workflow_type, pair_tup_str=pair_tup_str, result_dir=result_dir, verbose=verbose, filename_base=filename_base)
 
   # 2. yoy returns
   yoy_returns_filename = plot_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, test_index_shortened, look_back, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
 
-  # 3. predicted vs actual spread plot
-  predicted_vs_actual_spread_filename = plot_comparison(gt_test_shortened_series, forecast_test_shortened_series, test_index_shortened, workflow_type="Kalman Filter", pair_tup_str=pair_tup_str, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
+  # 3. predicted vs actual spread plotworkflow_type
+  predicted_vs_actual_spread_filename = plot_comparison(gt_test_shortened_series, forecast_test_shortened_series, test_index_shortened, workflow_type=workflow_type, pair_tup_str=pair_tup_str, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
 
   ### Plotting #####
   plot_filenames = {
