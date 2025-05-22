@@ -275,7 +275,10 @@ def execute_kalman_workflow(
   )
   gt_yoy = ((gt_returns[-1] / gt_returns[0])**(365 / len(gt_returns)) - 1)[0]
 
-  current_result_dir = filename_base.replace(".pkl", "_kalman")
+  if add_technical_indicators:
+    current_result_dir = filename_base.replace(".pkl", "_kalman")
+  else:
+    current_result_dir = filename_base.replace(".pkl", "_kalman_without_ta")  
   result_dir = os.path.join(result_parent_dir, current_result_dir)
   if not os.path.exists(result_dir):
       os.makedirs(result_dir)
