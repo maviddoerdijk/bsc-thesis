@@ -30,3 +30,20 @@ def save_data(data, startDateStr, endDateStr, instrumentIds, cache_dir='.'):
     filepath = os.path.join(cache_dir, filename)
     with open(filepath, 'wb') as f:
         pickle.dump(data, f)
+
+def save_pairs_data_filtered(pairs_data_filtered, startDateStr, endDateStr, instrumentIds, cache_dir='.'):
+    base_filename = _get_filename(startDateStr, endDateStr, instrumentIds)
+    filename_pairs_data = base_filename.replace(".pkl", "_pairs_data_filtered.pkl")
+    filepath = os.path.join(cache_dir, filename_pairs_data)
+    with open(filepath, 'wb') as f:
+        pickle.dump(pairs_data_filtered, f)
+
+def gather_pairs_data_cached(startDateStr, endDateStr, instrumentIds, cache_dir='.'):
+    base_filename = _get_filename(startDateStr, endDateStr, instrumentIds)
+    filename_pairs_data = base_filename.replace(".pkl", "_pairs_data_filtered.pkl")
+    filepath = os.path.join(cache_dir, filename_pairs_data)
+    if os.path.exists(filepath):
+        with open(filepath, 'rb') as f:
+            return pickle.load(f)
+    else:
+        return None
