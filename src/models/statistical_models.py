@@ -7,6 +7,8 @@ from pykalman import KalmanFilter
 import pandas as pd
 from matplotlib import pyplot as plt
 from typing import Callable, Dict, Any, Optional, Tuple, Sequence, Union
+import torch
+import random
 
 # custom imports
 from backtesting.trading_strategy import trade
@@ -114,6 +116,7 @@ def execute_kalman_workflow(
   burn_in: int = 30,
   train_frac: float = 0.90,
   dev_frac: float = 0.05,
+  seed: int = 3178749, # for reproducibility, my student number
   look_back: int = 1,
   denoise_fn: Optional[Callable[[pd.Series], np.ndarray]] = wav_den,
   scaler_factory: Callable[..., MinMaxScaler] = MinMaxScaler,
@@ -130,6 +133,18 @@ def execute_kalman_workflow(
   filename_base: str = "data_begindate_enddate_hash.pkl", # use `_get_filename(startDateStr, endDateStr, instrumentIds)`
   pair_tup_str: str = "(?,?)" # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
 ):
+  # Set seeds
+  torch.manual_seed(seed)
+  np.random.seed(seed)
+  random.seed(seed)
+
+  # For GPU (if used)
+  if torch.cuda.is_available():
+      torch.cuda.manual_seed(seed)
+      torch.cuda.manual_seed_all(seed)
+      torch.backends.cudnn.deterministic = True
+      torch.backends.cudnn.benchmark = False  # Might slow down, but ensures determinism
+      
   # Check whether everything is present as expected (good practice, and gives useful exceptions)
   required = {col_s1, col_s2}
   if not required.issubset(pair_data.columns):

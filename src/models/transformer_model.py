@@ -7,6 +7,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 from sklearn.preprocessing import MinMaxScaler
+import random
 
 # custom imports
 from utils.visualization import plot_train_val_loss, plot_return_uncertainty, plot_comparison
@@ -22,6 +23,7 @@ def execute_transformer_workflow(
   burn_in: int = 30, # we remove the first 30 elements, because the largest window used for technical indicators is
   train_frac: float = 0.90,
   dev_frac: float = 0.05,   # remaining part is test
+  seed: int = 3178749, # for reproducibility, my student number
   look_back: int = 20,
   batch_size: int = 64,
   epochs: int = 400,
@@ -37,6 +39,18 @@ def execute_transformer_workflow(
   filename_base: str = "data_begindate_enddate_hash.pkl",
   pair_tup_str: str = "(?,?)" # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
 ):
+  # Set seeds
+  torch.manual_seed(seed)
+  np.random.seed(seed)
+  random.seed(seed)
+
+  # For GPU (if used)
+  if torch.cuda.is_available():
+      torch.cuda.manual_seed(seed)
+      torch.cuda.manual_seed_all(seed)
+      torch.backends.cudnn.deterministic = True
+      torch.backends.cudnn.benchmark = False  # Might slow down, but ensures determinism
+        
   if not target_col in pairs_timeseries.columns:
     raise KeyError(f"pairs_timeseries must contain {target_col}")
 
