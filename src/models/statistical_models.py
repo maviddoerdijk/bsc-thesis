@@ -277,8 +277,8 @@ def execute_kalman_workflow(
   # calculate the strategy returns if we were to feed the groundtruth values to the `trade` func. If the ground truth returns are lower, it seems likely there is something wrong with the `trade` func (but not certain! Probability applies here).
   # forecast_test_shortened = forecast_test[:len(testY_untr)]
   # spread_pred_series = pd.Series(forecast_test_shortened, index=index_shortened)
-  index_shortened = test.index[:len(testY_untr)]
-  spread_gt_series = pd.Series(testY_untr, index=index_shortened)
+  index_shortened = test.index[:len(test['Spread_Close'].values[look_back:])]
+  spread_gt_series = pd.Series(test['Spread_Close'].values[look_back:], index=index_shortened)
   gt_returns = trade(
       S1 = test['S1_close'].iloc[look_back:],
       S2 = test['S2_close'].iloc[look_back:],
