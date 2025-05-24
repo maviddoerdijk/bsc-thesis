@@ -13,7 +13,7 @@ import random
 from utils.visualization import plot_train_val_loss, plot_return_uncertainty, plot_comparison
 from models.statistical_models import default_normalize
 from preprocessing.wavelet_denoising import wav_den
-from backtesting.trading_strategy import trade
+from backtesting.trading_strategy import trade, get_gt_yoy_returns_test_dev
 from backtesting.utils import calculate_return_uncertainty
 
 
@@ -23,7 +23,6 @@ def execute_transformer_workflow(
   burn_in: int = 30, # we remove the first 30 elements, because the largest window used for technical indicators is
   train_frac: float = 0.90,
   dev_frac: float = 0.05,   # remaining part is test
-  seed: int = 3178749, # for reproducibility, my student number
   look_back: int = 20,
   batch_size: int = 64,
   epochs: int = 400,
@@ -39,18 +38,6 @@ def execute_transformer_workflow(
   filename_base: str = "data_begindate_enddate_hash.pkl",
   pair_tup_str: str = "(?,?)" # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
 ):
-  # Set seeds
-  torch.manual_seed(seed)
-  np.random.seed(seed)
-  random.seed(seed)
-
-  # For GPU (if used)
-  if torch.cuda.is_available():
-      torch.cuda.manual_seed(seed)
-      torch.cuda.manual_seed_all(seed)
-      torch.backends.cudnn.deterministic = True
-      torch.backends.cudnn.benchmark = False  # Might slow down, but ensures determinism
-        
   if not target_col in pairs_timeseries.columns:
     raise KeyError(f"pairs_timeseries must contain {target_col}")
 
@@ -140,8 +127,6 @@ def execute_transformer_workflow(
   test_loader  = DataLoader(test_ds,  batch_size=batch_size,
                             shuffle=False, drop_last=False, num_workers=0)
 
-  if verbose:
-    print(f"Single tensor shape: {next(iter(train_loader))[0].shape}")   # torch.Size([64, 20, 34]) //  (batch_size, look_back, features)
 
   class TimeSeriesTransformerv1(nn.Module):
     """
@@ -272,15 +257,44 @@ def execute_transformer_workflow(
         all_preds.append(preds)
         all_targets.append(y_test_batch)
 
+  # Helper: Get preds/targets from dataloader, in scaled space
+  def get_preds_targets_scaled(dataloader, model, device):
+      all_preds = []
+      all_targets = []
+      model.eval()
+      with torch.no_grad():
+          for x_batch, y_batch in dataloader:
+              x_batch, y_batch = x_batch.to(device), y_batch.to(device)
+              preds = model(x_batch).cpu().numpy()
+              targets = y_batch.cpu().numpy()
+              all_preds.append(preds)
+              all_targets.append(targets)
+      all_preds = np.concatenate(all_preds).reshape(-1, 1)
+      all_targets = np.concatenate(all_targets).reshape(-1, 1)
+      return all_preds, all_targets
+
+  ## GETTING MSE's
+  # VAL (DEV)
+  val_preds_scaled, val_targets_scaled = get_preds_targets_scaled(dev_loader, model, DEVICE)
+  val_mse_before_inverse = np.mean((val_preds_scaled - val_targets_scaled) ** 2) # not used (basically the wrong mse)
+  # Inverse-transform to original space
+  val_preds_orig = y_scaler.inverse_transform(val_preds_scaled)
+  val_targets_orig = y_scaler.inverse_transform(val_targets_scaled)
+  val_mse_after_inverse = np.mean((val_preds_orig - val_targets_orig) ** 2)
+
+  # TEST
+  test_preds_scaled, test_targets_scaled = get_preds_targets_scaled(test_loader, model, DEVICE)
+  test_mse_before_inverse = np.mean((test_preds_scaled - test_targets_scaled) ** 2) # not used (basically the wrong mse)
+  test_preds_orig = y_scaler.inverse_transform(test_preds_scaled)
+  test_targets_orig = y_scaler.inverse_transform(test_targets_scaled)
+  test_mse_after_inverse = np.mean((test_preds_orig - test_targets_orig) ** 2)
+
   # maybe too much explanation here, but y_hat and y_true respectively represent the predicted and ground truth values
   y_hat_scaled = np.concatenate(all_preds).reshape(-1, 1)
   y_true_scaled = np.concatenate(all_targets).reshape(-1, 1)
 
   y_hat = y_scaler.inverse_transform(y_hat_scaled)
   y_true = y_scaler.inverse_transform(y_true_scaled)
-
-  test_mse = np.mean((y_hat - y_true) ** 2)
-  print(f"Test MSE  : {test_mse:.6f}")
 
   ## Trading
   test_s1_shortened = test_multivariate['S1_close'].iloc[look_back:]
@@ -289,17 +303,8 @@ def execute_transformer_workflow(
   forecast_test_shortened_series = pd.Series(y_hat.squeeze(), index=test_index_shortened)
   gt_test_shortened_series = pd.Series(y_true.squeeze(), index=test_index_shortened)
 
-  spread_gt_series = pd.Series(y_true.squeeze(), index=test_index_shortened)
-  gt_returns = trade(
-      S1 = test_s1_shortened,
-      S2 = test_s2_shortened,
-      spread = spread_gt_series,
-      window_long = 30,
-      window_short = 5,
-      position_threshold = 1.0,
-      clearing_threshold = 0.5
-  )
-  gt_yoy = ((gt_returns[-1] / gt_returns[0])**(365 / len(gt_returns)) - 1)
+  output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=20)
+  gt_yoy, gt_yoy_for_dev_dataset = output['gt_yoy_test'], output['gt_yoy_dev']
 
   ## Trading: Mean YoY
   min_position = 2.00
@@ -331,7 +336,7 @@ def execute_transformer_workflow(
   # 2. yoy returns
   yoy_returns_filename = plot_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, test_index_shortened, look_back, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
 
-  # 3. predicted vs actual spread plotworkflow_type
+  # 3. predicted vs actual spread plot
   predicted_vs_actual_spread_filename = plot_comparison(gt_test_shortened_series, forecast_test_shortened_series, test_index_shortened, workflow_type=workflow_type, pair_tup_str=pair_tup_str, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
 
   ### Plotting #####
@@ -341,15 +346,15 @@ def execute_transformer_workflow(
       "train_val_loss": train_val_loss_filename
   }
   output: Dict[str, Any] = dict(
-      val_mse=val_losses[-1],
-      test_mse=test_mse,
+      val_mse=val_mse_after_inverse,
+      test_mse=test_mse_after_inverse,
       yoy_mean=yoy_mean,
       yoy_std=yoy_std,
       gt_yoy=gt_yoy,
       result_parent_dir=result_parent_dir,
       plot_filenames=plot_filenames
   )
-  
+
   results_str = f"""
 Validation MSE: {output['val_mse']}
 Test MSE: {output['test_mse']}
@@ -372,6 +377,6 @@ Plot filenames: {output['plot_filenames']}
                     dev  =(devX_raw,   devX_scaled,   devY_raw,   devY_scaled),
                     test =(testX_raw,  testX_scaled,  testY_raw,  testY_scaled)
                 ))
-      
+
       )
   return output
