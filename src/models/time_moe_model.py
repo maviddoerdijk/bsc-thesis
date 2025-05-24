@@ -93,7 +93,7 @@ def execute_timemoe_workflow(
           seq = series.iloc[i:i+look_back].values
           target = series.iloc[i+look_back]
           X.append(seq)
-          y.append(target)
+          y.append(target) # TODO: check whether target really is Spread_Close, or whether it is S1_close or S2_close
 
       X = torch.tensor(X, dtype=torch.float32)
       X = X.to(DEVICE)
@@ -249,6 +249,11 @@ def execute_timemoe_workflow(
 
   dev_mse = mean_squared_error(devY_raw.numpy(), dev_predictions)
   test_mse = mean_squared_error(testY_raw.numpy(), predictions)
+  dev_variance = devY_raw.numpy().var()
+  dev_nmse = dev_mse / dev_variance if dev_variance != 0 else float('inf')
+  test_variance = testY_raw.numpy().var()
+  test_nmse = test_mse / test_variance if test_variance != 0 else float('inf')
+  
   plot_filenames = {
       "yoy_returns": yoy_returns_filename,
       "predicted_vs_actual_spread": predicted_vs_actual_spread_filename,
@@ -256,8 +261,8 @@ def execute_timemoe_workflow(
   }
 
   output: Dict[str, Any] = dict(
-      val_mse=dev_mse,
-      test_mse=test_mse,
+      val_mse=dev_nmse,
+      test_mse=test_nmse,
       yoy_mean=yoy_mean,
       yoy_std=yoy_std,
       gt_yoy=gt_yoy,

@@ -246,12 +246,16 @@ def execute_kalman_workflow(
         testY_norm_list = [row for row in testY_norm]
 
         test_mse = acc_metric(testY_norm_list, yhat_KF_mse)
+        test_var = np.var(testY_norm)
+        test_nmse = test_mse / test_var if test_var != 0 else 0.0
 
         yhat_KF_dev_mse = [np.array([v]) for v in forecast_dev]
         devY_arr = np.array(devY_untr)
         devY_norm = (devY_arr - devY_arr.mean()) / devY_arr.std()
         devY_norm_list = [row for row in devY_norm]
         val_mse = acc_metric(devY_norm_list, yhat_KF_dev_mse)
+        val_var = np.var(devY_norm)
+        val_nmse = val_mse / val_var if val_var != 0 else 0.0
     else:
         print("Warning: look_back > 1 not yet implemented. Returning None for mse.")
         test_mse = None
@@ -306,8 +310,8 @@ def execute_kalman_workflow(
   }
   # save results to .txt file
   results_str = f"""
-Validation MSE: {val_mse}
-Test MSE: {test_mse}
+Validation MSE: {val_nmse}
+Test MSE: {test_nmse}
 YOY Returns: {yoy_mean * 100:.2f}%
 YOY Std: +- {yoy_std * 100:.2f}%
 GT Yoy: {gt_yoy * 100:.2f}%
@@ -321,8 +325,8 @@ Plot filenames: {plot_filenames}
   if verbose:
     print(results_str)
   output: Dict[str, Any] = dict(
-      val_mse=val_mse,
-      test_mse=test_mse,
+      val_mse=val_nmse,
+      test_mse=test_nmse,
       yoy_mean=yoy_mean,
       yoy_std=yoy_std,
       gt_yoy=gt_yoy,

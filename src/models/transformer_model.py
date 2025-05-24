@@ -50,7 +50,10 @@ def execute_transformer_workflow(
       torch.cuda.manual_seed_all(seed)
       torch.backends.cudnn.deterministic = True
       torch.backends.cudnn.benchmark = False  # Might slow down, but ensures determinism
-      
+
+  if not target_col in pairs_timeseries.columns:
+    raise KeyError(f"pairs_timeseries must contain {target_col}")
+
   # burn the first 30 elements
   pairs_timeseries_burned = pairs_timeseries.iloc[burn_in:].copy()
 
@@ -83,34 +86,38 @@ def execute_transformer_workflow(
 
   # We want a sliding window in our dataset
   # TODO: defining this function should not be part of workflow, but imported from a custom module
-  def create_sliding_dataset(mat: np.ndarray,
+  def create_sliding_dataset(df: pd.DataFrame,
                             x_scaler: MinMaxScaler,
                             y_scaler: MinMaxScaler,
-                            look_back: int = 20):
+                            look_back: int = 20,
+                            target_col: str = "Spread_Close",
+                            fit_scaler: bool = False):
       """
       X  -> (samples, look_back, features)
       y  -> (samples, 1)   — the next-step Spread_Close (just 1 day in advance)
       """
       X, y = [], []
-      for i in range(len(mat) - look_back):
-          X.append(mat[i : i + look_back, :]) # window
-          y.append(mat[i + look_back, 0]) # value right after the window
+      for i in range(len(df) - look_back):
+          X.append(df.iloc[i : i + look_back].values) # window
+          y.append(df[target_col].iloc[i + look_back]) # value right after the window
       X, y = np.array(X), np.array(y).reshape(-1, 1)
+      X_flat = X.reshape(-1, X.shape[-1])
 
-      # scale per feature (fit on the training set once!)
-      X_scaled = x_scaler.fit_transform(
-          X.reshape(-1, X.shape[-1])
-      ).reshape(X.shape)
-      y_scaled = y_scaler.fit_transform(y)
+      if fit_scaler: # only fit on the training set!
+          X_scaled = x_scaler.fit_transform(X_flat).reshape(X.shape)
+          y_scaled = y_scaler.fit_transform(y)
+      else:
+          X_scaled = x_scaler.transform(X_flat).reshape(X.shape)
+          y_scaled = y_scaler.transform(y)
 
       return X, X_scaled, y, y_scaled
 
   trainX_raw, trainX_scaled, trainY_raw, trainY_scaled = create_sliding_dataset(
-      train.values, x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back) # train_X_scaled.shape: (2219, 20, 34) // [(t - look_back), look_back, features]
+      train, x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back, target_col=target_col, fit_scaler = True) # train_X_scaled.shape: (2219, 20, 34) // [(t - look_back), look_back, features]
   devX_raw,   devX_scaled,   devY_raw,   devY_scaled   = create_sliding_dataset(
-      dev.values,  x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back)
+      dev,  x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back, target_col=target_col, fit_scaler = False)
   testX_raw,  testX_scaled,  testY_raw,  testY_scaled  = create_sliding_dataset(
-      test.values, x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back)
+      test, x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back, target_col=target_col, fit_scaler = False)
 
 
   # use pytorch Dataset class
@@ -286,7 +293,7 @@ def execute_transformer_workflow(
   ## GETTING MSE's
   # VAL (DEV)
   val_preds_scaled, val_targets_scaled = get_preds_targets_scaled(dev_loader, model, DEVICE)
-  val_mse_before_inverse = np.mean((val_preds_scaled - val_targets_scaled) ** 2) # not used (basically the wrong mse)
+  val_mse_before_inverse = np.mean((val_preds_scaled - val_targets_scaled) ** 2)
   # Inverse-transform to original space
   val_preds_orig = y_scaler.inverse_transform(val_preds_scaled)
   val_targets_orig = y_scaler.inverse_transform(val_targets_scaled)
@@ -294,7 +301,7 @@ def execute_transformer_workflow(
 
   # TEST
   test_preds_scaled, test_targets_scaled = get_preds_targets_scaled(test_loader, model, DEVICE)
-  test_mse_before_inverse = np.mean((test_preds_scaled - test_targets_scaled) ** 2) # not used (basically the wrong mse)
+  test_mse_before_inverse = np.mean((test_preds_scaled - test_targets_scaled) ** 2)
   test_preds_orig = y_scaler.inverse_transform(test_preds_scaled)
   test_targets_orig = y_scaler.inverse_transform(test_targets_scaled)
   test_mse_after_inverse = np.mean((test_preds_orig - test_targets_orig) ** 2)
@@ -317,10 +324,10 @@ def execute_transformer_workflow(
   gt_yoy, gt_yoy_for_dev_dataset = output['gt_yoy_test'], output['gt_yoy_dev']
 
   ## Trading: Mean YoY
-  min_position = 2.00
-  max_position = 4.00
-  min_clearing = 0.30
-  max_clearing = 0.70
+  min_position = 3.00
+  max_position = 3.50
+  min_clearing = 0.40
+  max_clearing = 0.50
   position_thresholds = np.linspace(min_position, max_position, num=10)
   clearing_thresholds = np.linspace(min_clearing, max_clearing, num=10)
   yoy_mean, yoy_std = calculate_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds)
@@ -335,7 +342,6 @@ def execute_transformer_workflow(
   result_dir = os.path.join(result_parent_dir, current_result_dir)
   if not os.path.exists(result_dir):
       os.makedirs(result_dir)
-
   ### Plotting #####
   workflow_type = "Transformer"
   if not add_technical_indicators:
