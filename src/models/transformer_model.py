@@ -298,6 +298,8 @@ def execute_transformer_workflow(
   val_preds_orig = y_scaler.inverse_transform(val_preds_scaled)
   val_targets_orig = y_scaler.inverse_transform(val_targets_scaled)
   val_mse_after_inverse = np.mean((val_preds_orig - val_targets_orig) ** 2)
+  val_var = np.var(val_targets_orig)
+  val_nmse = val_mse_after_inverse / val_var # normalized mean squared error
 
   # TEST
   test_preds_scaled, test_targets_scaled = get_preds_targets_scaled(test_loader, model, DEVICE)
@@ -305,6 +307,8 @@ def execute_transformer_workflow(
   test_preds_orig = y_scaler.inverse_transform(test_preds_scaled)
   test_targets_orig = y_scaler.inverse_transform(test_targets_scaled)
   test_mse_after_inverse = np.mean((test_preds_orig - test_targets_orig) ** 2)
+  test_var = np.var(test_targets_orig)
+  test_nmse = test_mse_after_inverse / test_var
 
   # maybe too much explanation here, but y_hat and y_true respectively represent the predicted and ground truth values
   y_hat_scaled = np.concatenate(all_preds).reshape(-1, 1)
@@ -362,8 +366,8 @@ def execute_transformer_workflow(
       "train_val_loss": train_val_loss_filename
   }
   output: Dict[str, Any] = dict(
-      val_mse=val_mse_after_inverse,
-      test_mse=test_mse_after_inverse,
+      val_mse=val_nmse,
+      test_mse=test_nmse,
       yoy_mean=yoy_mean,
       yoy_std=yoy_std,
       gt_yoy=gt_yoy,
