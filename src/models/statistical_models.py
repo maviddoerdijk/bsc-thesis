@@ -206,12 +206,16 @@ def execute_kalman_workflow(
           testY_arr = np.array(y_test).reshape(-1, 1)
           testY_list = [np.array([v]) for v in y_test]
           test_mse = acc_metric(testY_list, forecast_test_list)
+          test_var = np.var(testY_arr)
+          test_nmse = test_mse / test_var if test_var != 0 else 0.0
 
           # # repeat for dev / validaiton
           forecast_dev_list = [np.array([v]) for v in forecast_dev]
           devY_arr = np.array(y_dev).reshape(-1, 1)
           devY_list = [np.array([v]) for v in y_dev]
           val_mse = acc_metric(devY_list, forecast_dev_list)
+          val_var = np.var(devY_arr)
+          val_nmse = val_mse / val_var if val_var != 0 else 0.0
       else:
           print("Warning: look_back > 1 not yet implemented. Returning None for mse.")
           test_mse, val_mse = None, None
@@ -292,7 +296,7 @@ def execute_kalman_workflow(
       position_threshold = 3,
       clearing_threshold = 0.4
   )
-  gt_yoy = ((gt_returns[-1] / gt_returns[0])**(365 / len(gt_returns)) - 1)[0]
+  gt_yoy = ((gt_returns[-1] / gt_returns[0])**(365 / len(gt_returns)) - 1)
 
   if add_technical_indicators:
     current_result_dir = filename_base.replace(".pkl", "_kalman")
