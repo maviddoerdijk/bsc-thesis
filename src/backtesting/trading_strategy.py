@@ -6,58 +6,49 @@ def trade(
     spread: pd.Series, # model-predicted spread for the strategy
     window_long: int,
     window_short: int,
-    initial_cash: float = 100000,
+    initial_cash=250000,
     position_threshold: float = 1.0,
     clearing_threshold: float = 0.5,
-    risk_fraction: float = 0.1
-) -> list:
+    risk_fraction: float = 0.1 # could be used again
+):   
+    if len(spread) != len(S1) or len(spread) != len(S2):
+        raise ValueError("Length of S1, S2, and spread must be the same")
+    # Compute rolling mean and rolling standard deviation
+
     ma_long = spread.rolling(window=window_long, center=False).mean()
     ma_short = spread.rolling(window=window_short, center=False).mean()
     std = spread.rolling(window=window_short, center=False).std()
     zscore = (ma_long - ma_short)/std
 
-    # starting with initial_cash allows us to calculate the returns as a percentage of the initial cash, over a time period (YoY are not equal to QoQ for example)
-    cash = initial_cash
+    # Simulate trading
+    # Start with no money and no positions
+    cash = initial_cash # initial cash amount, perhaps not hardcoded in the future
     qty_s1 = 0
     qty_s2 = 0
-    returns = [initial_cash] # note: starting with initial cash allows us to calculate the returns as a percentage of the initial cash, over a time period (YoY are not equal to QoQ for example), but it causes a problem with plotting where we extend the returns length by one. Be wary of this.
-    position = 0 # 0: neutral, 1: long, -1: short
-    
-    if len(spread) != len(S1) or len(spread) != len(S2):
-        raise ValueError("Length of S1, S2, and spread must be the same")
+    returns = [initial_cash]
 
-    for i in range(len(spread)): # each iteration of the for loop is a new time step, in this case often a single day
-        price_s1 = S1.iloc[i]
-        price_s2 = S2.iloc[i]
-        beta = spread.iloc[i]
-        equity = cash + qty_s1 * price_s1 - qty_s2 * price_s2
-
-        # Enter short spread (short S1, long beta S2)
-        if position == 0 and zscore.iloc[i] > position_threshold:
-            position = -1
-            position_size = equity * risk_fraction
-            qty_s1 = -position_size / price_s1
-            qty_s2 = (position_size * beta) / price_s2
-            cash -= (qty_s1 * price_s1 - qty_s2 * price_s2)
-
-        # Enter long spread (long S1, short beta S2)
-        elif position == 0 and zscore.iloc[i] < -position_threshold:
-            position = 1
-            position_size = equity * risk_fraction
-            qty_s1 = position_size / price_s1
-            qty_s2 = - (position_size * beta) / price_s2
-            cash -= (qty_s1 * price_s1 - qty_s2 * price_s2)
-
-        # Exit to neutral when spread reverts
-        elif position != 0 and abs(zscore.iloc[i]) < clearing_threshold:
-            cash += qty_s1 * price_s1 - qty_s2 * price_s2
+    for i in range(len(spread)):
+        # Sell short if the z-score is > 1
+        if zscore.iloc[i] > position_threshold:
+            # print(f"[NEW] Step {i}: SELL SHORT, z={zscore.iloc[i]:.2f}, S1={S1.iloc[i]:.2f}, S2={S2.iloc[i]:.2f}, spread={spread.iloc[i]:.2f}, cash={cash:.2f}, qty_s1={qty_s1}, qty_s2={qty_s2}")
+            cash += S1.iloc[i] - S2.iloc[i] * spread.iloc[i]
+            qty_s1 -= 1
+            qty_s2 += spread.iloc[i]
+            returns.append(cash)
+        # Buy long if the z-score is < 1
+        elif zscore.iloc[i] < -position_threshold:
+            # print(f"[NEW] Step {i}: BUY LONG, z={zscore.iloc[i]:.2f}, S1={S1.iloc[i]:.2f}, S2={S2.iloc[i]:.2f}, spread={spread.iloc[i]:.2f}, cash={cash:.2f}, qty_s1={qty_s1}, qty_s2={qty_s2}")
+            cash -= S1.iloc[i] - S2.iloc[i] * spread.iloc[i]
+            qty_s1 += 1
+            qty_s2 -= spread.iloc[i]
+            returns.append(cash)
+        # Clear positions if the z-score between -.5 and .5
+        elif abs(zscore.iloc[i]) < clearing_threshold:
+            # print(f"[NEW] Step {i}: CLEAR POSITION, z={zscore.iloc[i]:.2f}, S1={S1.iloc[i]:.2f}, S2={S2.iloc[i]:.2f}, spread={spread.iloc[i]:.2f}, cash={cash:.2f}, qty_s1={qty_s1}, qty_s2={qty_s2}")
+            cash += qty_s1 * S1.iloc[i] - S2.iloc[i] * qty_s2
             qty_s1 = 0
             qty_s2 = 0
-            position = 0
-
-        equity = cash + qty_s1 * price_s1 - qty_s2 * price_s2
-        returns.append(equity)
-
+            returns.append(cash)
     return returns
 
 def get_gt_yoy_returns_test_dev(pairs_timeseries_df, dev_frac, train_frac, look_back):
