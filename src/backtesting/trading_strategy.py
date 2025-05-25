@@ -34,21 +34,19 @@ def trade(
             cash += S1.iloc[i] - S2.iloc[i] * spread.iloc[i]
             qty_s1 -= 1
             qty_s2 += spread.iloc[i]
-            returns.append(cash)
         # Buy long if the z-score is < 1
         elif zscore.iloc[i] < -position_threshold:
             # print(f"[NEW] Step {i}: BUY LONG, z={zscore.iloc[i]:.2f}, S1={S1.iloc[i]:.2f}, S2={S2.iloc[i]:.2f}, spread={spread.iloc[i]:.2f}, cash={cash:.2f}, qty_s1={qty_s1}, qty_s2={qty_s2}")
             cash -= S1.iloc[i] - S2.iloc[i] * spread.iloc[i]
             qty_s1 += 1
             qty_s2 -= spread.iloc[i]
-            returns.append(cash)
         # Clear positions if the z-score between -.5 and .5
         elif abs(zscore.iloc[i]) < clearing_threshold:
             # print(f"[NEW] Step {i}: CLEAR POSITION, z={zscore.iloc[i]:.2f}, S1={S1.iloc[i]:.2f}, S2={S2.iloc[i]:.2f}, spread={spread.iloc[i]:.2f}, cash={cash:.2f}, qty_s1={qty_s1}, qty_s2={qty_s2}")
             cash += qty_s1 * S1.iloc[i] - S2.iloc[i] * qty_s2
             qty_s1 = 0
             qty_s2 = 0
-            returns.append(cash)
+        returns.append(cash) # append the current cash value to returns
     return returns
 
 def get_gt_yoy_returns_test_dev(pairs_timeseries_df, dev_frac, train_frac, look_back):
