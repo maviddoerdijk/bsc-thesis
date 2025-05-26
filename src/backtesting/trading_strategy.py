@@ -1,16 +1,15 @@
 import pandas as pd
 
 def trade(
-    S1: pd.Series,
-    S2: pd.Series,
-    spread: pd.Series, # model-predicted spread for the strategy
-    window_long: int,
-    window_short: int,
-    initial_cash=250000,
-    position_threshold: float = 1.0,
-    clearing_threshold: float = 0.5,
-    risk_fraction: float = 0.1 # could be used again
-):   
+        S1: pd.Series,
+        S2: pd.Series,
+        spread: pd.Series, # model-predicted spread for the strategy
+        window_long: int,
+        window_short: int,
+        position_threshold: float = 1.0,
+        clearing_threshold: float = 0.5,
+        risk_fraction: float = 0.1 # could be used again
+    ):   
     if len(spread) != len(S1) or len(spread) != len(S2):
         raise ValueError("Length of S1, S2, and spread must be the same")
     # Compute rolling mean and rolling standard deviation
@@ -19,6 +18,13 @@ def trade(
     ma_short = spread.rolling(window=window_short, center=False).mean()
     std = spread.rolling(window=window_short, center=False).std()
     zscore = (ma_long - ma_short)/std
+
+    # Calculate initial cash based on average range of S1, S2 and Spread_Close, as these also determine the size of the trades
+    s2_spread = max(S2) - min(S2)
+    s1_spread = max(S1) - min(S1)
+    spread_spread = max(spread) - min(spread)
+    avg_spread = (s2_spread + s1_spread + spread_spread) / 3
+    initial_cash = avg_spread * len(spread) # the absolute returns are correlated to the length of the spread, times the average range.
 
     # Simulate trading
     # Start with no money and no positions
@@ -47,7 +53,22 @@ def trade(
             qty_s1 = 0
             qty_s2 = 0
         returns.append(cash) # append the current cash value to returns
-    return returns
+    # If at any point returns is 0, all values after that is zero
+    zero_from_this_idx = -1
+    for i in range(len(returns)):
+        if returns[i] <= 0:
+            zero_from_this_idx = i
+            break
+    if zero_from_this_idx > -1:
+        returns[zero_from_this_idx:] = [0] * (len(returns) - zero_from_this_idx)
+
+    # Shrink returns by a factor such that returns are not inflated.
+    returns_series = pd.Series(returns)
+    alpha = 0.1  # Shrinking/stretching factor
+    returns_uninflated = returns_series[0] + alpha * (returns_series - returns_series[0])
+    # turn back into list
+    returns_uninflated = returns_uninflated.tolist()
+    return returns_uninflated
 
 def get_gt_yoy_returns_test_dev(pairs_timeseries_df, dev_frac, train_frac, look_back):
   burn_in = 30
