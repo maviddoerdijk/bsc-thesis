@@ -253,6 +253,8 @@ def execute_kalman_workflow(
         forecast_test_formatted = np.array([[v] for v in forecast_test])
 
         test_mse = acc_metric(groundtruth_test_formatted, forecast_test_formatted)
+        test_var = np.var(groundtruth_test)
+        test_nmse = test_mse / test_var if test_var != 0 else 0.0
 
         # also for validation
         groundtruth_dev = pair_data[target_col].iloc[len(trainX):len(trainX) + len(devX)]
@@ -260,6 +262,8 @@ def execute_kalman_workflow(
         forecast_dev_formatted = np.array([[v] for v in forecast_dev])
 
         val_mse = acc_metric(groundtruth_dev_formatted, forecast_dev_formatted)
+        val_var = np.var(groundtruth_dev)
+        val_nmse = val_mse / val_var if val_var != 0 else 0.
     else:
         print("Warning: look_back > 1 not yet implemented. Returning None for mse.")
         test_mse = None
