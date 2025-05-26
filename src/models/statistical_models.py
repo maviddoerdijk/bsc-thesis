@@ -131,7 +131,8 @@ def execute_kalman_workflow(
   add_technical_indicators: bool = True,
   result_parent_dir: str = "data/results",
   filename_base: str = "data_begindate_enddate_hash.pkl", # use `_get_filename(startDateStr, endDateStr, instrumentIds)`
-  pair_tup_str: str = "(?,?)" # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
+  pair_tup_str: str = "(?,?)", # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
+  return_predicted_spread: bool = False
 ):
   # Set seeds
   torch.manual_seed(seed)
@@ -280,6 +281,9 @@ def execute_kalman_workflow(
   testY_untr_shortened = pd.Series(testY_untr, index=test_index_shortened)
   test_s1_shortened = test['S1_close'].iloc[:len(testY_untr)]
   test_s2_shortened = test['S2_close'].iloc[:len(testY_untr)]
+  
+  if return_predicted_spread:
+    return forecast_test_shortened_series, test_nmse
 
   yoy_mean, yoy_std = calculate_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds)
   # calculate the strategy returns if we were to feed the groundtruth values to the `trade` func. If the ground truth returns are lower, it seems likely there is something wrong with the `trade` func (but not certain! Probability applies here).

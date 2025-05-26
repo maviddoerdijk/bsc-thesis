@@ -33,7 +33,8 @@ def execute_timemoe_workflow(
   load_finetuned = True,
   result_parent_dir: str = "data/results",
   filename_base: str = "data_begindate_enddate_hash.pkl",
-  pair_tup_str: str = "(?,?)" # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
+  pair_tup_str: str = "(?,?)", # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
+  return_predicted_spread: bool = False
 ):
   # Set seeds
   torch.manual_seed(seed)
@@ -253,6 +254,9 @@ def execute_timemoe_workflow(
   dev_nmse = dev_mse / dev_variance if dev_variance != 0 else float('inf')
   test_variance = testY_raw.numpy().var()
   test_nmse = test_mse / test_variance if test_variance != 0 else float('inf')
+  
+  if return_predicted_spread:
+    return forecast_test_shortened_series, test_nmse
   
   plot_filenames = {
       "yoy_returns": yoy_returns_filename,

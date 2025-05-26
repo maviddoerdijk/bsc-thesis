@@ -24,6 +24,12 @@ def execute_transformer_workflow(
   train_frac: float = 0.90,
   dev_frac: float = 0.05,   # remaining part is test
   seed: int = 3178749, # for reproducibility, my student number
+  hyperparams: Dict = {
+        "d_model": 256, 
+        "nhead":  8,
+        "dropout": 0.1,
+        "learning_rate": 3e-4
+  },
   look_back: int = 20,
   batch_size: int = 64,
   epochs: int = 400,
@@ -37,7 +43,8 @@ def execute_transformer_workflow(
   add_technical_indicators: bool = True,
   result_parent_dir: str = "data/results",
   filename_base: str = "data_begindate_enddate_hash.pkl",
-  pair_tup_str: str = "(?,?)" # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
+  pair_tup_str: str = "(?,?)", # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
+  return_predicted_spread: bool = False   
 ):
   # Set seeds
   torch.manual_seed(seed)
@@ -50,6 +57,16 @@ def execute_transformer_workflow(
       torch.cuda.manual_seed_all(seed)
       torch.backends.cudnn.deterministic = True
       torch.backends.cudnn.benchmark = False  # Might slow down, but ensures determinism
+      
+  # add any missing hyperparams back into dict
+  if "learning_rate" not in hyperparams:
+    hyperparams["learning_rate"] = 3e-4
+  if "nhead" not in hyperparams:
+    hyperparams["nhead"] = 8
+  if "d_model" not in hyperparams:
+    hyperparams["d_model"] = 128
+  if "dropout" not in hyperparams:
+    hyperparams["dropout"] = 0.1
 
   if not target_col in pairs_timeseries.columns:
     raise KeyError(f"pairs_timeseries must contain {target_col}")
@@ -155,10 +172,10 @@ def execute_transformer_workflow(
         self,
         n_features: int,
         seq_len: int,
-        d_model: int = 128,
-        nhead: int = 8,
+        d_model: int = hyperparams['d_model'],
+        nhead: int = hyperparams['nhead'],
         num_layers: int = 4,
-        dropout: float = 0.1,
+        dropout: float = hyperparams['dropout'],
     ):
         super().__init__()
         self.seq_len = seq_len
@@ -199,13 +216,13 @@ def execute_transformer_workflow(
   model  = TimeSeriesTransformerv1(
               n_features=n_features,
               seq_len=look_back,
-              d_model=128,
-              nhead=8,
+              d_model=hyperparams['d_model'],
+              nhead=hyperparams['nhead'],
               num_layers=4,
-              dropout=0.1).to(DEVICE)
+              dropout=hyperparams['dropout']).to(DEVICE)
 
   criterion = nn.MSELoss()
-  optimizer = AdamW(model.parameters(), lr=3e-4, weight_decay=1e-2)
+  optimizer = AdamW(model.parameters(), lr=hyperparams['learning_rate'], weight_decay=1e-2)
 
   EPOCHS = epochs
   PATIENCE = patience
@@ -336,6 +353,8 @@ def execute_transformer_workflow(
   clearing_thresholds = np.linspace(min_clearing, max_clearing, num=10)
   yoy_mean, yoy_std = calculate_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds)
 
+  if return_predicted_spread:
+    return forecast_test_shortened_series, test_nmse
 
   ## The variables that should be returned, according to what was returned by the `execute_kalman_workflow` func:
   # give same output as was originally the case
