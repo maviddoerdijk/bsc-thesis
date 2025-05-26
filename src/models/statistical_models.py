@@ -17,7 +17,7 @@ from utils.visualization import plot_return_uncertainty, plot_comparison
 from preprocessing.wavelet_denoising import wav_den
 
 
-def create_dataset(mat: np.ndarray, scaler: MinMaxScaler = MinMaxScaler(feature_range=(0, 1)), look_back: int = 1
+def create_dataset(mat: np.ndarray, x_scaler: MinMaxScaler = MinMaxScaler(feature_range=(0, 1)), y_scaler: MinMaxScaler = MinMaxScaler(feature_range=(0, 1)), look_back: int = 1, fit_scaler: bool = False
                     ) -> Tuple[np.ndarray, np.ndarray,
                                 np.ndarray, np.ndarray]:
     """
@@ -28,10 +28,13 @@ def create_dataset(mat: np.ndarray, scaler: MinMaxScaler = MinMaxScaler(feature_
     for i in range(len(mat) - look_back):
         dataX.append(mat[i, :])
         dataY.append(mat[(i + 1):(i + 1 + look_back), 0])
-    return (dataX,
-            scaler.fit_transform(dataX),
-            dataY,
-            scaler.fit_transform(dataY))
+    if fit_scaler:
+        dataX_scaled = x_scaler.fit_transform(dataX)
+        dataY_scaled = y_scaler.fit_transform(dataY)
+    else:
+        dataX_scaled = x_scaler.transform(dataX)
+        dataY_scaled = y_scaler.transform(dataY)
+    return dataX, dataX_scaled, dataY, dataY_scaled
 
 def default_normalize(series: pd.Series) -> pd.Series:
     # z-score normalization
@@ -111,6 +114,7 @@ def kalman_filter_regression_multivariate(X, y, delta=1e-4, obs_cov=1e-2):
 
 def execute_kalman_workflow(
   pair_data: pd.DataFrame,
+  target_col: str = "Spread_Close",
   col_s1: str = "S1_close",
   col_s2: str = "S2_close",
   burn_in: int = 30,
@@ -170,14 +174,15 @@ def execute_kalman_workflow(
       train = pd.DataFrame({col: denoise_fn(train[col]) for col in keep_cols})
 
   if scaler_factory is not None:
-      scaler = scaler_factory(**(scaler_kwargs or {}))
+      x_scaler = scaler_factory(**(scaler_kwargs or {}))
+      y_scaler = scaler_factory(**(scaler_kwargs or {}))
   else:
       scaler = None
 
 
-  trainX_untr, trainX, trainY_untr, trainY = create_dataset(train.values, scaler=scaler, look_back=look_back)
-  devX_untr,   devX,   devY_untr,   devY   = create_dataset(dev.values,  scaler=scaler, look_back=look_back)
-  testX_untr,  testX,  testY_untr,  testY  = create_dataset(test.values, scaler=scaler, look_back=look_back)
+  trainX_untr, trainX, trainY_untr, trainY = create_dataset(train.values, x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back, fit_scaler = True) # To prevent lookahead bias, only fit scaler on training data!
+  devX_untr,   devX,   devY_untr,   devY   = create_dataset(dev.values,  x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back, fit_scaler = True) 
+  testX_untr,  testX,  testY_untr,  testY  = create_dataset(test.values, x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back, fit_scaler = False)
 
   if add_technical_indicators:
       # Predict S1_close using all other columns except S1_close as X, making it multivariate regression with a very large number of variables (the technical indicators)
@@ -190,11 +195,11 @@ def execute_kalman_workflow(
       y_test = test[col_s1].values
       X_test = test.drop(columns=[col_s1]).values
 
-      # apply scaler to all versions of the input
-      if scaler is not None:
-          X_train = scaler.fit_transform(X_train)
-          X_dev = scaler.transform(X_dev)
-          X_test = scaler.transform(X_test)
+      # apply x_scaler to all versions of the input
+      if x_scaler is not None:
+          X_train = x_scaler.fit_transform(X_train)
+          X_dev = x_scaler.transform(X_dev)
+          X_test = x_scaler.transform(X_test)
 
       # recursive least squares multivariate regression, using the function
       beta_t = kalman_filter_regression_multivariate(X_train, y_train, delta=delta)
@@ -241,26 +246,20 @@ def execute_kalman_workflow(
     forecast_test = kalman_spread[-len(testX):].to_numpy()
 
     if look_back == 1:
-        yhat_KF_mse = [np.array([v]) for v in forecast_test]
+        # Calculate mse values
+        groundtruth_test = pair_data[target_col].iloc[-len(testX):]
+        # format into wanted form for `acc_metric` function
+        groundtruth_test_formatted = np.array([[v] for v in groundtruth_test])
+        forecast_test_formatted = np.array([[v] for v in forecast_test])
 
-        # Original normalisation: operate directly on the list-of-arrays
-        testY_arr  = np.array(testY_untr)               # shape (N,1)
-        testY_norm = (testY_arr - testY_arr.mean()) / testY_arr.std()
+        test_mse = acc_metric(groundtruth_test_formatted, forecast_test_formatted)
 
-        # Convert back to list-of-arrays so acc_metric sees the same layout
-        testY_norm_list = [row for row in testY_norm]
+        # also for validation
+        groundtruth_dev = pair_data[target_col].iloc[len(trainX):len(trainX) + len(devX)]
+        groundtruth_dev_formatted = np.array([[v] for v in groundtruth_dev])
+        forecast_dev_formatted = np.array([[v] for v in forecast_dev])
 
-        test_mse = acc_metric(testY_norm_list, yhat_KF_mse)
-        test_var = np.var(testY_norm)
-        test_nmse = test_mse / test_var if test_var != 0 else 0.0
-
-        yhat_KF_dev_mse = [np.array([v]) for v in forecast_dev]
-        devY_arr = np.array(devY_untr)
-        devY_norm = (devY_arr - devY_arr.mean()) / devY_arr.std()
-        devY_norm_list = [row for row in devY_norm]
-        val_mse = acc_metric(devY_norm_list, yhat_KF_dev_mse)
-        val_var = np.var(devY_norm)
-        val_nmse = val_mse / val_var if val_var != 0 else 0.0
+        val_mse = acc_metric(groundtruth_dev_formatted, forecast_dev_formatted)
     else:
         print("Warning: look_back > 1 not yet implemented. Returning None for mse.")
         test_mse = None
@@ -281,7 +280,7 @@ def execute_kalman_workflow(
   testY_untr_shortened = pd.Series(testY_untr, index=test_index_shortened)
   test_s1_shortened = test['S1_close'].iloc[:len(testY_untr)]
   test_s2_shortened = test['S2_close'].iloc[:len(testY_untr)]
-  
+
   if return_predicted_spread:
     return forecast_test_shortened_series, test_nmse
 
