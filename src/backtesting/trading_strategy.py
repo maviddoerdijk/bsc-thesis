@@ -50,7 +50,7 @@ def trade(
     return returns
 
 def get_gt_yoy_returns_test_dev(pairs_timeseries_df, dev_frac, train_frac, look_back):
-  burn_in = 20
+  burn_in = 30
 
   pairs_timeseries_df_burned_in = pairs_timeseries_df.iloc[burn_in:].copy()
 
