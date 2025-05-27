@@ -25,6 +25,8 @@ def trade(
     spread_spread = max(spread) - min(spread)
     avg_spread = (s2_spread + s1_spread + spread_spread) / 3
     initial_cash = avg_spread * len(spread) # the absolute returns are correlated to the length of the spread, times the average range.
+    # overwrite initial_cash to standard value
+    initial_cash = 10000
 
     # Simulate trading
     # Start with no money and no positions
