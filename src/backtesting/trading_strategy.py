@@ -64,11 +64,12 @@ def trade(
     if zero_from_this_idx > -1:
         returns[zero_from_this_idx:] = [0] * (len(returns) - zero_from_this_idx)
 
-    # Shrink returns by a factor such that returns are not inflated.
+    # Shrink returns by a factor such that returns are not inflated (more explanation given in methodology).
     returns_series = pd.Series(returns)
     alpha = 0.1  # Shrinking/stretching factor
-    returns_uninflated = returns_series[0] + alpha * (returns_series - returns_series[0])
-    # turn back into list
+    returns_uninflated = returns_series.copy()
+    mask = returns_series > initial_cash
+    returns_uninflated[mask] = initial_cash + alpha * (returns_series[mask] - initial_cash)
     returns_uninflated = returns_uninflated.tolist()
     return returns_uninflated
 
