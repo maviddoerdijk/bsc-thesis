@@ -47,7 +47,7 @@ def execute_timemoe_workflow(
       torch.cuda.manual_seed_all(seed)
       torch.backends.cudnn.deterministic = True
       torch.backends.cudnn.benchmark = False  # Might slow down, but ensures determinism
-  
+      
   if not target_col in pairs_timeseries.columns:
     raise KeyError(f"pairs_timeseries must contain {target_col}")
   FLASH_ATTN = False
@@ -76,16 +76,15 @@ def execute_timemoe_workflow(
   if verbose:
       print(f"Split sizes — train: {len(train)}, dev: {len(dev)}, test: {len(test)}")
 
-  # def create_sequences(series, look_back):
-  #     X_raw = series[:batch_size * look_back].to_numpy() # .reshape(batch_size, look_back)
-  #     X_raw = torch.tensor(X_raw, dtype=torch.float32)
-
-  #     # normalize devX_raw
-  #     mean, std = devX_raw.mean(dim=-1, keepdim=True), devX_raw.std(dim=-1, keepdim=True)
-  #     X_scaled = (devX_raw - mean) / std
-  #     return X_raw, X_scaled, None, None, mean, std
   DEVICE = "cpu" #  "cuda" if torch.cuda.is_available() else "cpu"
 
+  def create_sequences(series):
+      # series: pd.Series
+      X_raw = torch.tensor(series.values, dtype=torch.float32)
+      mean = X_raw.mean()
+      std = X_raw.std()
+      X_scaled = (X_raw - mean) / (std + 1e-8)
+      return X_raw, X_scaled, X_raw, X_scaled, mean, std
 
   def create_sequences_rolling(series, look_back):
       X = []
@@ -97,26 +96,43 @@ def execute_timemoe_workflow(
           y.append(target) # TODO: check whether target really is Spread_Close, or whether it is S1_close or S2_close
 
       X = torch.tensor(X, dtype=torch.float32)
+      y = torch.tensor(y, dtype=torch.float32)
+
       X = X.to(DEVICE)
+      y = y.to(DEVICE)
 
       # normalize
       mean = X.mean(dim=-1, keepdim=True)
       std = X.std(dim=-1, keepdim=True)
       X_scaled = (X - mean) / (std + 1e-8)
+      # For y, broadcast mean/std to match shape
+      y_scaled = (y - mean.squeeze(-1)) / (std.squeeze(-1) + 1e-8)
 
       y = torch.tensor(y, dtype=torch.float32)
       y = y.to(DEVICE)
-      return X, X_scaled, y, None, mean, std
+      return X, X_scaled, y, y_scaled, mean, std
 
-  devX_raw, devX_scaled, devY_raw, devY_scaled, dev_mean, dev_std = create_sequences_rolling(dev, look_back)
-  trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences_rolling(train, look_back)
-  testX_raw, testX_scaled, testY_raw, testY_scaled, test_mean, test_std = create_sequences_rolling(test, look_back)
+  devX_raw, devX_scaled, devY_raw, devY_scaled, dev_mean, dev_std = create_sequences(dev)# , look_back)
+  trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences(train) #, look_back)
+  testX_raw, testX_scaled, testY_raw, testY_scaled, test_mean, test_std = create_sequences(test) #, look_back)
+
+  ## use rolling sequences not for training, but still for inferencing dev and test ##
+  devX_raw_rolling, devX_scaled_rolling, devY_raw_rolling, devY_scaled_rolling, dev_mean_rolling, dev_std_rolling = create_sequences_rolling(dev, look_back)
+  testX_raw_rolling, testX_scaled_rolling, testY_raw_rolling, testY_scaled_rolling, test_mean_rolling, test_std_rolling = create_sequences_rolling(test, look_back)
+
+  dev_ds_rolling = TensorDataset(devX_scaled_rolling, devY_scaled_rolling) # goal of TensorDataset class: loading and processing dataset lazily
+  test_ds_rolling = TensorDataset(testX_scaled_rolling, testY_scaled_rolling)
+
+  dev_loader_rolling = DataLoader(dev_ds_rolling, batch_size=batch_size, shuffle=False)
+  test_loader_rolling = DataLoader(test_ds_rolling, batch_size=batch_size, shuffle=False)
+  ## use rolling sequences not for training, but still for inferencing dev and test ##
+
   if verbose:
     print(f"devX_raw Shape: {devX_raw.shape}") # entire devX_raw has that shape before dataset and dev_loader logic
 
-  dev_ds = TensorDataset(devX_scaled, devY_raw) # goal of TensorDataset class: loading and processing dataset lazily
-  train_ds = TensorDataset(trainX_raw, trainY_raw)
-  test_ds = TensorDataset(testX_raw, testY_raw)
+  dev_ds = TensorDataset(devX_scaled, devY_scaled) # goal of TensorDataset class: loading and processing dataset lazily
+  train_ds = TensorDataset(trainX_scaled, trainY_scaled)
+  test_ds = TensorDataset(testX_scaled, testY_scaled)
 
   dev_loader = DataLoader(dev_ds, batch_size=batch_size, shuffle=False) # DataLoader takes care of shuffling/sampling/weigthed sampling, batching, using multiprocessing to load the data, use pinned memory etc. (source; https://discuss.pytorch.org/t/what-do-tensordataset-and-dataloader-do/107017)
   train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
@@ -132,9 +148,8 @@ def execute_timemoe_workflow(
     filepath_parent = os.path.join("data", "datasets")
     os.makedirs(filepath_parent, exist_ok=True)
     filepath_jsonl = os.path.join(filepath_parent, filename_jsonl)
-    # first method: try to train it on unnormalized sequence
-    with open(filepath_jsonl, "w") as f:
-        json_line = json.dumps({"sequence": train.to_list()})
+    with open(filepath_jsonl, "w") as f: # Train scaled (improves results according to paper, and empirical tests have also shown this)
+        json_line = json.dumps({"sequence": trainX_scaled.tolist()})
         f.write(json_line + "\n")
 
     train_time_moe(
@@ -158,7 +173,7 @@ def execute_timemoe_workflow(
 
   # forecast in batches from dev dataset
   all_predictions = []
-  for i, batch in enumerate(test_loader):
+  for i, batch in enumerate(test_loader_rolling):
     inputs = batch[0] # is devX_scaled, for now [1] will return error, later [1] will return devY_scaled :D
 
     yvals = batch[1]
@@ -171,8 +186,8 @@ def execute_timemoe_workflow(
     # from returned test_mean and test_std, slice the appropriate slices from the series
     input_size_current = inputs.size()
     batch_size_current = input_size_current[0]
-    local_means = test_mean[batch_size*i : batch_size*i + batch_size_current]
-    local_stds = test_std[batch_size*i : batch_size*i + batch_size_current]
+    local_means = test_mean_rolling[batch_size*i : batch_size*i + batch_size_current]
+    local_stds = test_std_rolling[batch_size*i : batch_size*i + batch_size_current]
 
     preds = normed_predictions * local_stds + local_means
     all_predictions.append(preds)
@@ -184,7 +199,7 @@ def execute_timemoe_workflow(
 
   # Also get dev/val predictions
   dev_predictions = []
-  for i, batch in enumerate(dev_loader):
+  for i, batch in enumerate(dev_loader_rolling):
     inputs = batch[0]
 
     output = model.generate(inputs, max_new_tokens=prediction_length)  # shape is [batch_size, look_back + prediction_length]
@@ -192,8 +207,8 @@ def execute_timemoe_workflow(
     input_size_current = inputs.size()
     batch_size_current = input_size_current[0]
     # get dev rather than test
-    local_means = dev_mean[batch_size*i : batch_size*i + batch_size_current]
-    local_stds = dev_std[batch_size*i : batch_size*i + batch_size_current]
+    local_means = dev_mean_rolling[batch_size*i : batch_size*i + batch_size_current]
+    local_stds = dev_std_rolling[batch_size*i : batch_size*i + batch_size_current]
 
     preds = normed_predictions * local_stds + local_means
     dev_predictions.append(preds)
@@ -206,7 +221,7 @@ def execute_timemoe_workflow(
   test_s2_shortened = test_multivariate['S2_close'].iloc[look_back:] # use multivariate versions, so we can still access cols like 'S1_close' and 'S2_close'
   test_index_shortened = test_multivariate.index[look_back:] # officially doesn't really matter whether to use `test_multivariate` or `test`, but do it like this for consistency
   forecast_test_shortened_series = pd.Series(predictions, index=test_index_shortened)
-  gt_test_shortened_series = pd.Series(testY_raw.numpy(), index=test_index_shortened)
+  gt_test_shortened_series = pd.Series(testY_raw.numpy()[look_back:], index=test_index_shortened)
 
   gt_returns = trade(
       S1 = test_s1_shortened,
@@ -248,16 +263,16 @@ def execute_timemoe_workflow(
 
   ### Plotting #####
 
-  dev_mse = mean_squared_error(devY_raw.numpy(), dev_predictions)
-  test_mse = mean_squared_error(testY_raw.numpy(), predictions)
-  dev_variance = devY_raw.numpy().var()
+  dev_mse = mean_squared_error(devY_raw.numpy()[look_back:], dev_predictions)
+  test_mse = mean_squared_error(testY_raw.numpy()[look_back:], predictions)
+  dev_variance = devY_raw.numpy()[look_back:].var()
   dev_nmse = dev_mse / dev_variance if dev_variance != 0 else float('inf')
-  test_variance = testY_raw.numpy().var()
+  test_variance = testY_raw.numpy()[look_back:].var()
   test_nmse = test_mse / test_variance if test_variance != 0 else float('inf')
-  
-  if return_predicted_spread:
-    return forecast_test_shortened_series, test_nmse
-  
+
+  # if return_predicted_spread:
+  #   return forecast_test_shortened_series, test_nmse
+
   plot_filenames = {
       "yoy_returns": yoy_returns_filename,
       "predicted_vs_actual_spread": predicted_vs_actual_spread_filename,
