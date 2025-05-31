@@ -66,10 +66,15 @@ def trade(
 
     # Shrink returns by a factor such that returns are not inflated (more explanation given in methodology).
     returns_series = pd.Series(returns)
-    alpha = 0.1  # Shrinking/stretching factor
+    alpha = 0.005  # Shrinking/stretching factor
     returns_uninflated = returns_series.copy()
-    mask = returns_series > initial_cash
-    returns_uninflated[mask] = initial_cash + alpha * (returns_series[mask] - initial_cash)
+    mask_positive = returns_series > initial_cash
+    returns_uninflated[mask_positive] = initial_cash + alpha * (returns_series[mask_positive] - initial_cash)
+
+    beta = 0.005
+    mask_negative = (returns_series < initial_cash) & (returns_series > 0) # in case of total loss of equity, do not mask
+    returns_uninflated[mask_negative] = initial_cash - beta * (initial_cash - returns_series[mask_negative])
+
     returns_uninflated = returns_uninflated.tolist()
     return returns_uninflated
 
