@@ -104,7 +104,7 @@ def get_gt_yoy_returns_test_dev(pairs_timeseries_df, dev_frac, train_frac, look_
       position_threshold = 3,
       clearing_threshold = 0.4
   )
-  gt_yoy_test = ((gt_returns_test[-1] / gt_returns_test[0])**(365 / len(gt_returns_test)) - 1)
+  gt_yoy_test = ((gt_returns_test[-1] / gt_returns_test[0])**(252 / len(gt_returns_test)) - 1)
 
   index_shortened = dev.index[:len(dev['Spread_Close'].values[look_back:])]
   spread_gt_series = pd.Series(dev['Spread_Close'].values[look_back:], index=index_shortened)
@@ -117,7 +117,7 @@ def get_gt_yoy_returns_test_dev(pairs_timeseries_df, dev_frac, train_frac, look_
       position_threshold = 3,
       clearing_threshold = 0.4
   )
-  gt_yoy_dev = ((gt_returns_dev[-1] / gt_returns_dev[0])**(365 / len(gt_returns_dev)) - 1)
+  gt_yoy_dev = ((gt_returns_dev[-1] / gt_returns_dev[0])**(252 / len(gt_returns_dev)) - 1)
   return {
       "gt_yoy_test": gt_yoy_test, 
       "gt_yoy_dev": gt_yoy_dev
