@@ -10,9 +10,8 @@ from transformers import AutoModelForCausalLM, AutoConfig
 import random
 
 # custom imports
-from utils.visualization import plot_return_uncertainty, plot_comparison
 from external.time_moe_repo.training_wrapper import train_time_moe
-from backtesting.trading_strategy import trade
+from backtesting.trading_strategy import get_gt_yoy_returns_test_dev
 from backtesting.utils import calculate_return_uncertainty
 
 ## semi-custom
@@ -39,7 +38,7 @@ def execute_timemoe_workflow(
   adam_epsilon=1e-8,
   ## optimized hyperparams
   return_datasets: bool = False,
-  batch_size: int = 8,
+  batch_size: int = 8, # TODO: go over which batch size should be used where! (training vs test inference)
   verbose: bool = True,
   load_finetuned = True,
   result_parent_dir: str = "data/results",
@@ -98,32 +97,27 @@ def execute_timemoe_workflow(
           seq = series.iloc[i:i+look_back].values
           target = series.iloc[i+look_back]
           X.append(seq)
-          y.append(target) # TODO: check whether target really is Spread_Close, or whether it is S1_close or S2_close
+          y.append(target) 
 
       X = torch.tensor(X, dtype=torch.float32)
       y = torch.tensor(y, dtype=torch.float32)
-
-      X = X.to(DEVICE)
-      y = y.to(DEVICE)
-
+      
       # z-score normalization
-      mean = X.mean(dim=-1, keepdim=True)
-      std = X.std(dim=-1, keepdim=True)
+      mean = series.mean()
+      std = series.std()
       X_scaled = (X - mean) / (std + 1e-8)
       # For y, broadcast mean/std to match shape
-      y_scaled = (y - mean.squeeze(-1)) / (std.squeeze(-1) + 1e-8) 
-
-      y = torch.tensor(y, dtype=torch.float32)
-      y = y.to(DEVICE)
-      return X, X_scaled, y, y_scaled, mean, std
+      y_scaled = (y - mean) / (std + 1e-8) 
+      return X, X_scaled, y, y_scaled, mean, std # rolling X (pure python), rolling X (torch tensor), torch series, scaled torch series, float, float   
 
   train_raw, train_scaled, train_mean, train_std = create_sequences(train_univariate) #, look_back)
   dev_raw, dev_scaled, dev_mean, dev_std = create_sequences(dev_univariate)# , look_back)
-  test_raw, test_scaled, test_mean, test_std = create_sequences(test_univariate) #, look_back)
+  test_raw, test_scaled, test_mean, test_std = create_sequences(test_univariate) #, look_back) 
 
   ## use rolling sequences not for training, but still for inferencing dev and test ##
-  devX_raw_rolling, devX_scaled_rolling, devY_raw_rolling, devY_scaled_rolling, dev_mean_rolling, dev_std_rolling = create_sequences_rolling(dev_univariate, look_back)
-  testX_raw_rolling, testX_scaled_rolling, testY_raw_rolling, testY_scaled_rolling, test_mean_rolling, test_std_rolling = create_sequences_rolling(test_univariate, look_back)
+  trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences_rolling(train_univariate, look_back=look_back)
+  devX_raw_rolling, devX_scaled_rolling, devY_raw_rolling, devY_scaled_rolling, _, _ = create_sequences_rolling(dev_univariate, look_back)
+  testX_raw_rolling, testX_scaled_rolling, testY_raw_rolling, testY_scaled_rolling, _, _ = create_sequences_rolling(test_univariate, look_back) # Note: dev_mean and test_mean may never be used; preventing data leakage
 
   dev_ds_rolling = TensorDataset(devX_scaled_rolling, devY_scaled_rolling) # goal of TensorDataset class: loading and processing dataset lazily
   test_ds_rolling = TensorDataset(testX_scaled_rolling, testY_scaled_rolling)
@@ -164,7 +158,6 @@ def execute_timemoe_workflow(
   else:
     model = AutoModelForCausalLM.from_pretrained(
         'Maple728/TimeMoE-50M',
-        device_map=DEVICE,
         trust_remote_code=True,
     )
 
@@ -185,10 +178,8 @@ def execute_timemoe_workflow(
     # from returned test_mean and test_std, slice the appropriate slices from the series
     input_size_current = inputs.size()
     batch_size_current = input_size_current[0]
-    local_means = test_mean_rolling[batch_size*i : batch_size*i + batch_size_current]
-    local_stds = test_std_rolling[batch_size*i : batch_size*i + batch_size_current]
-
-    preds = normed_predictions * local_stds + local_means
+    
+    preds = normed_predictions * train_std + train_mean
     all_predictions.append(preds)
 
   # Concatenate all predictions
@@ -205,11 +196,8 @@ def execute_timemoe_workflow(
     normed_predictions = output[:, -prediction_length:]
     input_size_current = inputs.size()
     batch_size_current = input_size_current[0]
-    # get dev rather than test
-    local_means = dev_mean_rolling[batch_size*i : batch_size*i + batch_size_current]
-    local_stds = dev_std_rolling[batch_size*i : batch_size*i + batch_size_current]
 
-    preds = normed_predictions * local_stds + local_means
+    preds = normed_predictions * train_std + train_mean
     dev_predictions.append(preds)
   dev_predictions = torch.cat(dev_predictions, dim=0)
   dev_predictions = dev_predictions.squeeze(-1)
@@ -222,17 +210,9 @@ def execute_timemoe_workflow(
   forecast_test_shortened_series = pd.Series(predictions, index=test_index_shortened)
   gt_test_shortened_series = pd.Series(test_scaled.numpy()[look_back:], index=test_index_shortened)
 
-  gt_returns = trade(
-      S1 = test_s1_shortened,
-      S2 = test_s2_shortened,
-      spread = gt_test_shortened_series,
-      window_long = 30,
-      window_short = 5,
-      position_threshold = 1.0,
-      clearing_threshold = 0.5
-  )
-  gt_yoy = ((gt_returns[-1] / gt_returns[0])**(yearly_trading_days / len(gt_returns)) - 1)
-
+  output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=20, yearly_trading_day=yearly_trading_days)
+  gt_yoy, gt_yoy_for_dev_dataset = output['gt_yoy_test'], output['gt_yoy_dev']
+  
   ## Trading: Mean YoY
   min_position = 2.00
   max_position = 4.00

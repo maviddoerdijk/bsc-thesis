@@ -1,29 +1,15 @@
-import pywt
 import numpy as np
 import os
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
 from pykalman import KalmanFilter
 import pandas as pd
-from matplotlib import pyplot as plt
-from typing import Callable, Dict, Any, Tuple, Sequence
+from typing import Dict, Any, Sequence
 import torch
 import random
 
 # custom imports
-from backtesting.trading_strategy import trade
+from backtesting.trading_strategy import get_gt_yoy_returns_test_dev
 from backtesting.utils import calculate_return_uncertainty
-from utils.visualization import plot_return_uncertainty, plot_comparison
-
-def default_normalize(series: pd.Series) -> pd.Series:
-    # z-score normalization
-    return (series - series.mean()) / series.std(ddof=0)
-
-def rmse_metric(y_true: Sequence[np.ndarray],
-                y_pred: Sequence[np.ndarray]) -> float:
-    # Currently using RMSE
-    mse = np.mean([mean_squared_error(yt, yp) for yt, yp in zip(y_true, y_pred)])
-    return np.sqrt(mse)
 
 def acc_metric(true_value: Sequence[np.ndarray],
                predicted_value: Sequence[np.ndarray]) -> float:
@@ -65,32 +51,8 @@ def kalman_filter_regression(x: pd.Series,
                       observation_covariance=obs_cov)
 
     state_means, _ = kf.filter(y.values)
-    return state_means          # shape (T, 2)
-
-def kalman_filter_regression_multivariate(X, y, delta=1e-4, obs_cov=1e-2):
-    T, d = X.shape
-    transition_matrix = np.eye(d)
-    transition_covariance = delta * np.eye(d)
-    # initially coefficients at zero
-    initial_state_mean = np.zeros(d)
-    initial_state_covariance = 1e3 * np.eye(d)
-    observation_covariance = obs_cov
-    observation_matrices = X[:, np.newaxis, :]
-
-    kf = KalmanFilter(
-        transition_matrices=transition_matrix,
-        observation_matrices=observation_matrices,
-        initial_state_mean=initial_state_mean,
-        initial_state_covariance=initial_state_covariance,
-        transition_covariance=transition_covariance,
-        observation_covariance=obs_cov,
-        n_dim_obs=1,
-        n_dim_state=d
-    )
-
-    state_means, _ = kf.filter(y)
-    return state_means
-
+    return state_means # has same length, so no shortening needed here
+  
 def execute_kalman_workflow(
   pairs_timeseries: pd.DataFrame,
   target_col: str = "Spread_Close",
@@ -154,8 +116,8 @@ def execute_kalman_workflow(
       return series_scaled, mean, std
 
   train_scaled, train_mean, train_std = create_sequences(train_multivariate)  
-  dev_scaled, dev_mean, dev_std = create_sequences(dev_multivariate)
-  test_scaled, test_mean, test_std = create_sequences(test_multivariate)
+  dev_scaled, _, _ = create_sequences(dev_multivariate)
+  test_scaled, _, _ = create_sequences(test_multivariate) # Note: to prevent data leakage, means and std's of test and dev may not be used.
 
   pairs_timeseries_scaled = pd.concat([train_scaled, dev_scaled, test_scaled])
 
@@ -186,7 +148,7 @@ def execute_kalman_workflow(
       groundtruth_test = pairs_timeseries[target_col].iloc[-len(test_multivariate):]
       # format into wanted form for `acc_metric` function
       groundtruth_test_formatted = np.array([[v] for v in groundtruth_test])
-      forecast_test_original_scale = forecast_test_normed * test_std + test_mean
+      forecast_test_original_scale = forecast_test_normed * train_std + train_mean
       forecast_test_formatted = np.array([[v] for v in forecast_test_original_scale])
 
       test_mse = acc_metric(groundtruth_test_formatted, forecast_test_formatted)
@@ -196,16 +158,14 @@ def execute_kalman_workflow(
       # also for validation
       groundtruth_dev = pairs_timeseries[target_col].iloc[len(train_multivariate):len(train_multivariate) + len(dev_multivariate)]
       groundtruth_dev_formatted = np.array([[v] for v in groundtruth_dev])
-      forecast_dev_original_scale = forecast_dev_normed * dev_std + dev_mean
+      forecast_dev_original_scale = forecast_dev_normed * train_std + train_mean
       forecast_dev_formatted = np.array([[v] for v in forecast_dev_original_scale])
 
       val_mse = acc_metric(groundtruth_dev_formatted, forecast_dev_formatted)
       val_var = np.var(groundtruth_dev)
       val_nmse = val_mse / val_var if val_var != 0 else 0.
   else:
-      print("Warning: look_back > 1 not yet implemented. Returning None for mse.")
-      test_mse = None
-      val_mse = None
+      raise NotImplementedError("Warning: look_back > 1 not yet implemented. Returning None for mse.")
 
   ### TRADING ###
   # calculate std_dev_pct using the logic from plot_with_uncertainty. Then put that into two separate functions: calculate_yoy_uncertainty and a version of plot_with_uncertainty that uses calculate_yoy_uncertainty
@@ -217,26 +177,18 @@ def execute_kalman_workflow(
   position_thresholds = np.linspace(min_position, max_position, num=10)
   clearing_thresholds = np.linspace(min_clearing, max_clearing, num=10)
 
-  test_index_shortened = test_multivariate.iloc[look_back:].index
-  forecast_test_shortened_series = pd.Series(forecast_test_original_scale, index=test_index_shortened)
-  test_s1_shortened = test_multivariate['S1_close'].iloc[look_back:]
-  test_s2_shortened = test_multivariate['S2_close'].iloc[look_back:]
+  test_index = test_multivariate.index
+  forecast_test_series = pd.Series(forecast_test_original_scale, index=test_index)
+  test_s1 = test_multivariate['S1_close']
+  test_s2 = test_multivariate['S2_close']
 
-  yoy_mean, yoy_std = calculate_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, yearly_trading_days=yearly_trading_days)
+  yoy_mean, yoy_std = calculate_return_uncertainty(test_s1, test_s2, forecast_test_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, yearly_trading_days=yearly_trading_days)
   # calculate the strategy returns if we were to feed the groundtruth values to the `trade` func. If the ground truth returns are lower, it seems likely there is something wrong with the `trade` func (but not certain! Probability applies here).
   # forecast_test_shortened = forecast_test[:len(testY_untr)]
   # spread_pred_series = pd.Series(forecast_test_shortened, index=index_shortened)
-  gt_test_shortened_series = pd.Series(test_multivariate['Spread_Close'].values[look_back:], index=test_index_shortened)
-  gt_returns = trade(
-      S1 = test_s1_shortened,
-      S2 = test_s2_shortened,
-      spread = gt_test_shortened_series,
-      window_long = 30,
-      window_short = 5,
-      position_threshold = 3,
-      clearing_threshold = 0.4
-  )
-  gt_yoy = ((gt_returns[-1] / gt_returns[0])**(yearly_trading_days / len(gt_returns)) - 1)
+  gt_test_series = pd.Series(test_multivariate['Spread_Close'].values, index=test_index)
+  output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=0, yearly_trading_day=yearly_trading_days)
+  gt_yoy, gt_yoy_for_dev_dataset = output['gt_yoy_test'], output['gt_yoy_dev']
 
   current_result_dir = filename_base.replace(".pkl", "_kalman")  
   result_dir = os.path.join(result_parent_dir, current_result_dir)
@@ -268,10 +220,10 @@ def execute_kalman_workflow(
   if return_datasets:
       output.update(
           dict(
-            test_s1_shortened=test_s1_shortened, 
-            test_s2_shortened=test_s2_shortened, 
-            forecast_test_shortened_series=forecast_test_shortened_series, 
-            gt_test_shortened_series=gt_test_shortened_series
+            test_s1_shortened=test_s1, 
+            test_s2_shortened=test_s2, 
+            forecast_test_shortened_series=forecast_test_series, 
+            gt_test_shortened_series=gt_test_series
           )
       )
   return output
