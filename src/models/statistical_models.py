@@ -6,7 +6,7 @@ from sklearn.metrics import mean_squared_error
 from pykalman import KalmanFilter
 import pandas as pd
 from matplotlib import pyplot as plt
-from typing import Callable, Dict, Any, Optional, Tuple, Sequence, Union
+from typing import Callable, Dict, Any, Tuple, Sequence
 import torch
 import random
 
@@ -14,27 +14,6 @@ import random
 from backtesting.trading_strategy import trade
 from backtesting.utils import calculate_return_uncertainty
 from utils.visualization import plot_return_uncertainty, plot_comparison
-from preprocessing.wavelet_denoising import wav_den
-
-
-def create_dataset(mat: np.ndarray, x_scaler: MinMaxScaler = MinMaxScaler(feature_range=(0, 1)), y_scaler: MinMaxScaler = MinMaxScaler(feature_range=(0, 1)), look_back: int = 1, fit_scaler: bool = False
-                    ) -> Tuple[np.ndarray, np.ndarray,
-                                np.ndarray, np.ndarray]:
-    """
-    Return  (raw_X, scaled_X, raw_Y, scaled_Y),
-    where Y is a 1-step shift of X[:,0].
-    """ 
-    dataX, dataY = [], []
-    for i in range(len(mat) - look_back):
-        dataX.append(mat[i, :])
-        dataY.append(mat[(i + 1):(i + 1 + look_back), 0])
-    if fit_scaler:
-        dataX_scaled = x_scaler.fit_transform(dataX)
-        dataY_scaled = y_scaler.fit_transform(dataY)
-    else:
-        dataX_scaled = x_scaler.transform(dataX)
-        dataY_scaled = y_scaler.transform(dataY)
-    return dataX, dataX_scaled, dataY, dataY_scaled
 
 def default_normalize(series: pd.Series) -> pd.Series:
     # z-score normalization
@@ -113,26 +92,22 @@ def kalman_filter_regression_multivariate(X, y, delta=1e-4, obs_cov=1e-2):
     return state_means
 
 def execute_kalman_workflow(
-  pair_data: pd.DataFrame,
+  pairs_timeseries: pd.DataFrame,
   target_col: str = "Spread_Close",
   col_s1: str = "S1_close",
   col_s2: str = "S2_close",
-  burn_in: int = 30,
   train_frac: float = 0.90,
   dev_frac: float = 0.05,
   seed: int = 3178749, # for reproducibility, my student number
   look_back: int = 1,
-  denoise_fn: Optional[Callable[[pd.Series], np.ndarray]] = wav_den,
-  scaler_factory: Callable[..., MinMaxScaler] = MinMaxScaler,
-  scaler_kwargs: Optional[Dict[str, Any]] = {"feature_range": (0, 1)},
   normalise_fn: Callable[[pd.Series], pd.Series] = default_normalize,
+  yearly_trading_days: int = 252,
   delta: float = 1e-3,
   obs_cov_reg: float = 2.,
   trans_cov_avg: float = 0.01,
   obs_cov_avg: float = 1.,
   return_datasets: bool = False,
   verbose: bool = True,
-  add_technical_indicators: bool = True,
   result_parent_dir: str = "data/results",
   filename_base: str = "data_begindate_enddate_hash.pkl", # use `_get_filename(startDateStr, endDateStr, instrumentIds)`
   pair_tup_str: str = "(?,?)", # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
@@ -152,122 +127,86 @@ def execute_kalman_workflow(
       
   # Check whether everything is present as expected (good practice, and gives useful exceptions)
   required = {col_s1, col_s2}
-  if not required.issubset(pair_data.columns):
-      raise KeyError(f"pair_data must contain {required}")
+  if not required.issubset(pairs_timeseries.columns):
+      raise KeyError(f"pairs_timeseries must contain {required}")
 
-  keep_cols = [c for c in pair_data.columns if c not in ("date",)]
-  df = pair_data[keep_cols].iloc[burn_in:].copy()
-
-  total_len = len(df)
+  total_len = len(pairs_timeseries)
   train_size = int(total_len * train_frac)
   dev_size   = int(total_len * dev_frac)
   test_size  = total_len - train_size - dev_size # not used, but for clarity
 
-  train = df.iloc[:train_size]
-  dev   = df.iloc[train_size:train_size + dev_size]
-  test  = df.iloc[train_size + dev_size:]
+  train_univariate = pairs_timeseries.iloc[:train_size][target_col]
+  dev_univariate = pairs_timeseries.iloc[train_size:train_size + dev_size][target_col]
+  test_univariate = pairs_timeseries.iloc[train_size + dev_size:][target_col]
+  
+  train_multivariate = pairs_timeseries.iloc[:train_size]
+  dev_multivariate = pairs_timeseries.iloc[train_size:train_size + dev_size]
+  test_multivariate = pairs_timeseries.iloc[train_size + dev_size:]  
 
   if verbose:
-      print(f"Split sizes — train: {len(train)}, dev: {len(dev)}, test: {len(test)}")
+      print(f"Split sizes — train: {len(train_univariate)}, dev: {len(dev_univariate)}, test: {len(test_univariate)}")
+      
+  def create_sequences(series):
+      # series: pd.Series
+      mean = series.mean()
+      std = series.std()
+      series_scaled = (series - mean) / (std + 1e-8)
+      return series_scaled, mean, std
 
-  if denoise_fn is not None: # denoise using wavelet denoising
-      train = pd.DataFrame({col: denoise_fn(train[col]) for col in keep_cols})
+  train_scaled, train_mean, train_std = create_sequences(train_multivariate)  
+  dev_scaled, dev_mean, dev_std = create_sequences(dev_multivariate)
+  test_scaled, test_mean, test_std = create_sequences(test_multivariate)
 
-  if scaler_factory is not None:
-      x_scaler = scaler_factory(**(scaler_kwargs or {}))
-      y_scaler = scaler_factory(**(scaler_kwargs or {}))
+  pairs_timeseries_scaled = pd.concat([train_scaled, dev_scaled, test_scaled])
+
+  # get beta_t, the Kalman-filtered regression coefficients
+  # Note: since the three time series are scaled independently, there is not any lookahead bias
+  beta_t = kalman_filter_regression(
+      kalman_filter_average(pairs_timeseries_scaled[col_s1],
+                            transition_cov=trans_cov_avg,
+                            obs_cov=obs_cov_avg),
+      kalman_filter_average(pairs_timeseries_scaled[col_s2],
+                            transition_cov=trans_cov_avg,
+                            obs_cov=obs_cov_avg),
+      delta=delta,
+      obs_cov=obs_cov_reg
+  )[:, 0]
+
+  predictions = normalise_fn(
+      pairs_timeseries_scaled[col_s1] + pairs_timeseries_scaled[col_s2] * beta_t)
+
+  if len(beta_t) != len(pairs_timeseries_scaled):
+    raise Exception("Sanity check failed: len(beta_t) != len(pairs_timeseries_scaled)")
+
+  forecast_train = predictions[:len(train_scaled)].to_numpy() # Though the variable `forecast_train` is never directly used as a variable, the data for it WAS used, during kalman filter averaging and regression
+  forecast_dev   = predictions[len(train_scaled):len(train_scaled) + len(dev_scaled)].to_numpy()
+  forecast_test = predictions[-len(test_scaled):].to_numpy()
+
+  if look_back == 1:
+      # Calculate mse values
+      groundtruth_test = pairs_timeseries[target_col].iloc[-len(test_multivariate):]
+      # format into wanted form for `acc_metric` function
+      groundtruth_test_formatted = np.array([[v] for v in groundtruth_test])
+      forecast_test_original_scale = forecast_test * test_std + test_mean
+      forecast_test_formatted = np.array([[v] for v in forecast_test_original_scale])
+
+      test_mse = acc_metric(groundtruth_test_formatted, forecast_test_formatted)
+      test_var = np.var(groundtruth_test)
+      test_nmse = test_mse / test_var if test_var != 0 else 0.0
+
+      # also for validation
+      groundtruth_dev = pairs_timeseries[target_col].iloc[len(train_multivariate):len(train_multivariate) + len(dev_multivariate)]
+      groundtruth_dev_formatted = np.array([[v] for v in groundtruth_dev])
+      forecast_dev_original_scale = forecast_dev * dev_std + dev_mean
+      forecast_dev_formatted = np.array([[v] for v in forecast_dev_original_scale])
+
+      val_mse = acc_metric(groundtruth_dev_formatted, forecast_dev_formatted)
+      val_var = np.var(groundtruth_dev)
+      val_nmse = val_mse / val_var if val_var != 0 else 0.
   else:
-      scaler = None
-
-
-  trainX_untr, trainX, trainY_untr, trainY = create_dataset(train.values, x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back, fit_scaler = True) # To prevent lookahead bias, only fit scaler on training data!
-  devX_untr,   devX,   devY_untr,   devY   = create_dataset(dev.values,  x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back, fit_scaler = True) 
-  testX_untr,  testX,  testY_untr,  testY  = create_dataset(test.values, x_scaler=x_scaler, y_scaler=y_scaler, look_back=look_back, fit_scaler = False)
-
-  if add_technical_indicators:
-      # Predict S1_close using all other columns except S1_close as X, making it multivariate regression with a very large number of variables (the technical indicators)
-      y_train = train[col_s1].values
-      X_train = train.drop(columns=[col_s1]).values # all input variables
-
-      # do the same for dev and test
-      y_dev = dev[col_s1].values
-      X_dev = dev.drop(columns=[col_s1]).values
-      y_test = test[col_s1].values
-      X_test = test.drop(columns=[col_s1]).values
-
-      # apply x_scaler to all versions of the input
-      if x_scaler is not None:
-          X_train = x_scaler.fit_transform(X_train)
-          X_dev = x_scaler.transform(X_dev)
-          X_test = x_scaler.transform(X_test)
-
-      # recursive least squares multivariate regression, using the function
-      beta_t = kalman_filter_regression_multivariate(X_train, y_train, delta=delta)
-      forecast_train = np.sum(X_train * beta_t, axis=1)
-      forecast_dev   = np.sum(X_dev * beta_t[-len(X_dev):], axis=1)
-      forecast_test  = np.sum(X_test * beta_t[-len(X_test):], axis=1)
-
-      if look_back == 1:
-          forecast_test_list = [np.array([v]) for v in forecast_test] # this way of calculating MSE is a bit messy and too many steps, but it works in the workflow now, so we'll keep it like this.
-          testY_arr = np.array(y_test).reshape(-1, 1)
-          testY_list = [np.array([v]) for v in y_test]
-          test_mse = acc_metric(testY_list, forecast_test_list)
-          test_var = np.var(testY_arr)
-          test_nmse = test_mse / test_var if test_var != 0 else 0.0
-
-          # # repeat for dev / validaiton
-          forecast_dev_list = [np.array([v]) for v in forecast_dev]
-          devY_arr = np.array(y_dev).reshape(-1, 1)
-          devY_list = [np.array([v]) for v in y_dev]
-          val_mse = acc_metric(devY_list, forecast_dev_list)
-          val_var = np.var(devY_arr)
-          val_nmse = val_mse / val_var if val_var != 0 else 0.0
-      else:
-          print("Warning: look_back > 1 not yet implemented. Returning None for mse.")
-          test_mse, val_mse = None, None
-  else:
-    # get beta_t, the Kalman-filtered regression coefficients
-    beta_t = kalman_filter_regression(
-        kalman_filter_average(pair_data[col_s1],
-                              transition_cov=trans_cov_avg,
-                              obs_cov=obs_cov_avg),
-        kalman_filter_average(pair_data[col_s2],
-                              transition_cov=trans_cov_avg,
-                              obs_cov=obs_cov_avg),
-        delta=delta,
-        obs_cov=obs_cov_reg
-    )[:, 0]
-
-    kalman_spread = normalise_fn(
-        pair_data[col_s1] + pair_data[col_s2] * beta_t)
-
-    forecast_train = kalman_spread[:len(trainX)].to_numpy() # Though the variable `forecast_train` is never directly used as a variable, the data for it WAS used, during kalman filter averaging and regression
-    forecast_dev   = kalman_spread[len(trainX):len(trainX) + len(devX)].to_numpy()
-    forecast_test = kalman_spread[-len(testX):].to_numpy()
-
-    if look_back == 1:
-        # Calculate mse values
-        groundtruth_test = pair_data[target_col].iloc[-len(testX):]
-        # format into wanted form for `acc_metric` function
-        groundtruth_test_formatted = np.array([[v] for v in groundtruth_test])
-        forecast_test_formatted = np.array([[v] for v in forecast_test])
-
-        test_mse = acc_metric(groundtruth_test_formatted, forecast_test_formatted)
-        test_var = np.var(groundtruth_test)
-        test_nmse = test_mse / test_var if test_var != 0 else 0.0
-
-        # also for validation
-        groundtruth_dev = pair_data[target_col].iloc[len(trainX):len(trainX) + len(devX)]
-        groundtruth_dev_formatted = np.array([[v] for v in groundtruth_dev])
-        forecast_dev_formatted = np.array([[v] for v in forecast_dev])
-
-        val_mse = acc_metric(groundtruth_dev_formatted, forecast_dev_formatted)
-        val_var = np.var(groundtruth_dev)
-        val_nmse = val_mse / val_var if val_var != 0 else 0.
-    else:
-        print("Warning: look_back > 1 not yet implemented. Returning None for mse.")
-        test_mse = None
-        val_mse = None
+      print("Warning: look_back > 1 not yet implemented. Returning None for mse.")
+      test_mse = None
+      val_mse = None
 
   ### TRADING ###
   # calculate std_dev_pct using the logic from plot_with_uncertainty. Then put that into two separate functions: calculate_yoy_uncertainty and a version of plot_with_uncertainty that uses calculate_yoy_uncertainty
@@ -279,59 +218,34 @@ def execute_kalman_workflow(
   position_thresholds = np.linspace(min_position, max_position, num=10)
   clearing_thresholds = np.linspace(min_clearing, max_clearing, num=10)
 
-  test_index_shortened = test.index[:len(testY_untr)]
-  forecast_test_shortened_series = pd.Series(forecast_test[:len(testY_untr)], index=test_index_shortened)
-  testY_untr_shortened = pd.Series(testY_untr, index=test_index_shortened)
-  test_s1_shortened = test['S1_close'].iloc[:len(testY_untr)]
-  test_s2_shortened = test['S2_close'].iloc[:len(testY_untr)]
+  test_index_shortened = test_multivariate.iloc[look_back:].index
+  forecast_test_shortened_series = pd.Series(forecast_test, index=test_index_shortened)
+  test_s1_shortened = test_multivariate['S1_close'].iloc[look_back:]
+  test_s2_shortened = test_multivariate['S2_close'].iloc[look_back:]
 
   if return_predicted_spread:
     return forecast_test_shortened_series, test_nmse
 
-  yoy_mean, yoy_std = calculate_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds)
+  yoy_mean, yoy_std = calculate_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, yearly_trading_days=yearly_trading_days)
   # calculate the strategy returns if we were to feed the groundtruth values to the `trade` func. If the ground truth returns are lower, it seems likely there is something wrong with the `trade` func (but not certain! Probability applies here).
   # forecast_test_shortened = forecast_test[:len(testY_untr)]
   # spread_pred_series = pd.Series(forecast_test_shortened, index=index_shortened)
-  index_shortened = test.index[:len(test['Spread_Close'].values[look_back:])]
-  spread_gt_series = pd.Series(test['Spread_Close'].values[look_back:], index=index_shortened)
+  spread_gt_series_shortened = pd.Series(test_multivariate['Spread_Close'].values[look_back:], index=test_index_shortened)
   gt_returns = trade(
-      S1 = test['S1_close'].iloc[look_back:],
-      S2 = test['S2_close'].iloc[look_back:],
-      spread = spread_gt_series,
+      S1 = test_s1_shortened,
+      S2 = test_s2_shortened,
+      spread = spread_gt_series_shortened,
       window_long = 30,
       window_short = 5,
       position_threshold = 3,
       clearing_threshold = 0.4
   )
-  gt_yoy = ((gt_returns[-1] / gt_returns[0])**(365 / len(gt_returns)) - 1)
+  gt_yoy = ((gt_returns[-1] / gt_returns[0])**(yearly_trading_days / len(gt_returns)) - 1)
 
-  if add_technical_indicators:
-    current_result_dir = filename_base.replace(".pkl", "_kalman")
-  else:
-    current_result_dir = filename_base.replace(".pkl", "_kalman_without_ta")  
+  current_result_dir = filename_base.replace(".pkl", "_kalman")  
   result_dir = os.path.join(result_parent_dir, current_result_dir)
   if not os.path.exists(result_dir):
       os.makedirs(result_dir)
-  yoy_returns_filename = plot_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, test_index_shortened, look_back, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
-  predicted_vs_actual_spread_filename = plot_comparison(testY_untr, forecast_test, test.index, workflow_type="Kalman Filter", pair_tup_str=pair_tup_str, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
-  plot_filenames = {
-      "yoy_returns": yoy_returns_filename,
-      "predicted_vs_actual_spread": predicted_vs_actual_spread_filename,
-      "train_val_loss": None
-  }
-  # save results to .txt file
-  results_str = f"""
-Validation MSE: {val_nmse}
-Test MSE: {test_nmse}
-YOY Returns: {yoy_mean * 100:.2f}%
-YOY Std: +- {yoy_std * 100:.2f}%
-GT Yoy: {gt_yoy * 100:.2f}%
-Plot filepath parent dir: {result_parent_dir}
-Plot filenames: {plot_filenames}
-  """
-  with open(os.path.join(result_dir, "results.txt"), "w") as f:
-      f.write(results_str)
-
 
   if verbose:
     print(results_str)
@@ -342,15 +256,26 @@ Plot filenames: {plot_filenames}
       yoy_std=yoy_std,
       gt_yoy=gt_yoy,
       result_parent_dir=result_parent_dir,
-      plot_filenames=plot_filenames
   )
+  
+  results_str = f"""
+  Validation MSE: {output['val_mse']}
+  Test MSE: {output['test_mse']}
+  YOY Returns: {output['yoy_mean'] * 100:.2f}%
+  YOY Std: +- {output['yoy_std'] * 100:.2f}%
+  GT Yoy: {output['gt_yoy'] * 100:.2f}%
+  Plot filepath parent dir: {output['result_parent_dir']}
+  pair_tup_str: {pair_tup_str}
+  """
+  with open(os.path.join(result_dir, "results.txt"), "w") as f:
+      f.write(results_str)
   if return_datasets:
       output.update(
-          dict(train=train, dev=dev, test=test,
-                datasets=dict(
-                    train=(trainX_untr, trainX, trainY_untr, trainY),
-                    dev  =(devX_untr,   devX,   devY_untr,   devY),
-                    test =(testX_untr,  testX,  testY_untr,  testY)
-                ))
+          dict(
+            test_s1_shortened=test_s1_shortened, 
+            test_s2_shortened=test_s2_shortened, 
+            forecast_test_shortened_series=forecast_test_shortened_series, 
+            spread_gt_series_shortened=spread_gt_series_shortened
+          )
       )
   return output
