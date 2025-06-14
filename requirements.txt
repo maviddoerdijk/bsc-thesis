@@ -12,3 +12,4 @@ curl-cffi==0.10.0
 transformers==4.40.1
 datasets==2.18.0
 accelerate==0.28.0
+scikit-optimize
