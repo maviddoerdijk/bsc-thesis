@@ -18,23 +18,33 @@ from backtesting.utils import calculate_return_uncertainty
 ## semi-custom
 from external.time_moe_repo.time_moe.models.modeling_time_moe import TimeMoeForPrediction
 
-
-
 def execute_timemoe_workflow(
   pairs_timeseries: pd.DataFrame,
   target_col: str = "Spread_Close",
-  burn_in: int = 30, # we remove the first 30 elements, because the largest window used for technical indicators is
+  col_s1: str = "S1_close",
+  col_s2: str = "S2_close",
   train_frac: float = 0.90,
   dev_frac: float = 0.05,   # remaining part is test
   seed: int = 3178749, # for reproducibility, my student number
   look_back: int = 20,
+  yearly_trading_days: int = 252,
+  ## optimized hyperparams ##
+  learning_rate=1e-4,
+  min_learning_rate=5e-5,
+  warmup_ratio=0.0,
+  weight_decay=0.1,
+  global_batch_size=64, # (just the batch size) other option would be micro_batch_size, which sets batch size per device
+  adam_beta1=0.9,
+  adam_beta2=0.95,
+  adam_epsilon=1e-8,
+  ## optimized hyperparams
+  return_datasets: bool = False,
   batch_size: int = 8,
   verbose: bool = True,
   load_finetuned = True,
   result_parent_dir: str = "data/results",
   filename_base: str = "data_begindate_enddate_hash.pkl",
-  pair_tup_str: str = "(?,?)", # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
-  return_predicted_spread: bool = False
+  pair_tup_str: str = "(?,?)" # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
 ):
   # Set seeds
   torch.manual_seed(seed)
@@ -50,41 +60,36 @@ def execute_timemoe_workflow(
       
   if not target_col in pairs_timeseries.columns:
     raise KeyError(f"pairs_timeseries must contain {target_col}")
-  FLASH_ATTN = False
-
-  # burn the first 30 elements
-  pairs_timeseries_burned = pairs_timeseries.iloc[burn_in:].copy()
-
-  total_len = len(pairs_timeseries_burned)
+  
+  total_len = len(pairs_timeseries)
   train_size = int(total_len * train_frac)
   dev_size   = int(total_len * dev_frac)
   test_size  = total_len - train_size - dev_size # not used, but for clarity
 
-  # Standard version of the Time-MoE model can only take in univariate time series. Therefore, we will train only on the target_col
-  # TODO: Convert to using multivariate again, a certain type of "multivariate" processing is possible according to the original time-moe paper, but not the version we would want to use. It is not possible to use many different features to enhance the prediction of the target column
-  pairs_timeseries_burned_univariate = pairs_timeseries_burned[target_col]
+  pairs_timeseries_univariate = pairs_timeseries[target_col]
 
-  train = pairs_timeseries_burned_univariate[:train_size]
-  dev   = pairs_timeseries_burned_univariate[train_size:train_size+dev_size] # aka validation
-  test  = pairs_timeseries_burned_univariate[train_size+dev_size:]
+  train_univariate = pairs_timeseries_univariate[:train_size]
+  dev_univariate = pairs_timeseries_univariate[train_size:train_size+dev_size] # aka validation
+  test_univariate = pairs_timeseries_univariate[train_size+dev_size:]
 
-  train_multivariate = pairs_timeseries_burned.iloc[:train_size]
-  dev_multivariate = pairs_timeseries_burned.iloc[train_size:train_size+dev_size]
-  test_multivariate = pairs_timeseries_burned.iloc[train_size+dev_size:]
-
+  train_multivariate = pairs_timeseries.iloc[:train_size]
+  dev_multivariate = pairs_timeseries.iloc[train_size:train_size+dev_size]
+  test_multivariate = pairs_timeseries.iloc[train_size+dev_size:]
 
   if verbose:
-      print(f"Split sizes — train: {len(train)}, dev: {len(dev)}, test: {len(test)}")
+      print(f"Split sizes — train: {len(train_univariate)}, dev: {len(dev_univariate)}, test: {len(test_univariate)}")
 
-  DEVICE = "cpu" #  "cuda" if torch.cuda.is_available() else "cpu"
+  DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+  if verbose:
+    print(f"Using device: {DEVICE}")
 
   def create_sequences(series):
       # series: pd.Series
-      X_raw = torch.tensor(series.values, dtype=torch.float32)
+      X_raw = torch.tensor(series.values, dtype=torch.float32) # note: using .values loses index
       mean = X_raw.mean()
       std = X_raw.std()
       X_scaled = (X_raw - mean) / (std + 1e-8)
-      return X_raw, X_scaled, X_raw, X_scaled, mean, std
+      return X_raw, X_scaled, mean, std
 
   def create_sequences_rolling(series, look_back):
       X = []
@@ -101,24 +106,24 @@ def execute_timemoe_workflow(
       X = X.to(DEVICE)
       y = y.to(DEVICE)
 
-      # normalize
+      # z-score normalization
       mean = X.mean(dim=-1, keepdim=True)
       std = X.std(dim=-1, keepdim=True)
       X_scaled = (X - mean) / (std + 1e-8)
       # For y, broadcast mean/std to match shape
-      y_scaled = (y - mean.squeeze(-1)) / (std.squeeze(-1) + 1e-8)
+      y_scaled = (y - mean.squeeze(-1)) / (std.squeeze(-1) + 1e-8) 
 
       y = torch.tensor(y, dtype=torch.float32)
       y = y.to(DEVICE)
       return X, X_scaled, y, y_scaled, mean, std
 
-  devX_raw, devX_scaled, devY_raw, devY_scaled, dev_mean, dev_std = create_sequences(dev)# , look_back)
-  trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences(train) #, look_back)
-  testX_raw, testX_scaled, testY_raw, testY_scaled, test_mean, test_std = create_sequences(test) #, look_back)
+  train_raw, train_scaled, train_mean, train_std = create_sequences(train_univariate) #, look_back)
+  dev_raw, dev_scaled, dev_mean, dev_std = create_sequences(dev_univariate)# , look_back)
+  test_raw, test_scaled, test_mean, test_std = create_sequences(test_univariate) #, look_back)
 
   ## use rolling sequences not for training, but still for inferencing dev and test ##
-  devX_raw_rolling, devX_scaled_rolling, devY_raw_rolling, devY_scaled_rolling, dev_mean_rolling, dev_std_rolling = create_sequences_rolling(dev, look_back)
-  testX_raw_rolling, testX_scaled_rolling, testY_raw_rolling, testY_scaled_rolling, test_mean_rolling, test_std_rolling = create_sequences_rolling(test, look_back)
+  devX_raw_rolling, devX_scaled_rolling, devY_raw_rolling, devY_scaled_rolling, dev_mean_rolling, dev_std_rolling = create_sequences_rolling(dev_univariate, look_back)
+  testX_raw_rolling, testX_scaled_rolling, testY_raw_rolling, testY_scaled_rolling, test_mean_rolling, test_std_rolling = create_sequences_rolling(test_univariate, look_back)
 
   dev_ds_rolling = TensorDataset(devX_scaled_rolling, devY_scaled_rolling) # goal of TensorDataset class: loading and processing dataset lazily
   test_ds_rolling = TensorDataset(testX_scaled_rolling, testY_scaled_rolling)
@@ -126,21 +131,7 @@ def execute_timemoe_workflow(
   dev_loader_rolling = DataLoader(dev_ds_rolling, batch_size=batch_size, shuffle=False)
   test_loader_rolling = DataLoader(test_ds_rolling, batch_size=batch_size, shuffle=False)
   ## use rolling sequences not for training, but still for inferencing dev and test ##
-
-  if verbose:
-    print(f"devX_raw Shape: {devX_raw.shape}") # entire devX_raw has that shape before dataset and dev_loader logic
-
-  dev_ds = TensorDataset(devX_scaled, devY_scaled) # goal of TensorDataset class: loading and processing dataset lazily
-  train_ds = TensorDataset(trainX_scaled, trainY_scaled)
-  test_ds = TensorDataset(testX_scaled, testY_scaled)
-
-  dev_loader = DataLoader(dev_ds, batch_size=batch_size, shuffle=False) # DataLoader takes care of shuffling/sampling/weigthed sampling, batching, using multiprocessing to load the data, use pinned memory etc. (source; https://discuss.pytorch.org/t/what-do-tensordataset-and-dataloader-do/107017)
-  train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-  test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
-
-  if verbose:
-    print(f"dev_loader tensor Shape: {next(iter(dev_loader))[0].shape}, with a total of {len(dev_loader)} batches") # a single tensor in dev_loader now has shape [batch_size, look_back] as expected
-
+    
   if load_finetuned:
     ## Training (only train in the case where we actually also want to load finetuned :D )
     # save contents of trainX_scaled to jsonl using _get_filename {"sequence": [1.7994326779272853, 2.554412431241829,
@@ -149,12 +140,22 @@ def execute_timemoe_workflow(
     os.makedirs(filepath_parent, exist_ok=True)
     filepath_jsonl = os.path.join(filepath_parent, filename_jsonl)
     with open(filepath_jsonl, "w") as f: # Train scaled (improves results according to paper, and empirical tests have also shown this)
-        json_line = json.dumps({"sequence": trainX_scaled.tolist()})
+        json_line = json.dumps({"sequence": train_scaled.tolist()})
         f.write(json_line + "\n")
 
     train_time_moe(
         data_path=filepath_jsonl,
-        dataloader_num_workers=2
+        dataloader_num_workers=2,
+        ## hyperparams ##
+        learning_rate=learning_rate,
+        min_learning_rate=min_learning_rate,
+        warmup_ratio=warmup_ratio,
+        weight_decay=weight_decay,
+        global_batch_size=global_batch_size, # (just the batch size) other option would be micro_batch_size, which sets batch size per device
+        adam_beta1=adam_beta1,
+        adam_beta2=adam_beta2,
+        adam_epsilon=adam_epsilon
+        ## hyperparams ##
     ) # after this, model is saved to logs/time_moe as model.safetensors (400+ MB)
     model_dir = "logs/time_moe"
     config = AutoConfig.from_pretrained(model_dir, trust_remote_code=True)
@@ -166,17 +167,15 @@ def execute_timemoe_workflow(
         device_map=DEVICE,
         trust_remote_code=True,
     )
-    if FLASH_ATTN: # if FLASH_ATTN, we assume the flash-attention module is installed, and adapt the model to use that
-      model = AutoModelForCausalLM.from_pretrained('Maple728/TimeMoE-50M', device_map="auto", attn_implementation='flash_attention_2', trust_remote_code=True)
 
-  prediction_length = 1 # TODO: rather than hardcoding prediction length, make a strategy where we can pick and choose different prediction lengths, and see what is affected by this (returns, std dev, ..)
+  prediction_length = 1
 
   # forecast in batches from dev dataset
   all_predictions = []
   for i, batch in enumerate(test_loader_rolling):
     inputs = batch[0] # is devX_scaled, for now [1] will return error, later [1] will return devY_scaled :D
 
-    yvals = batch[1]
+    # yvals = batch[1]
     # means = batch[2]
     # stds = batch[3]
 
@@ -217,11 +216,11 @@ def execute_timemoe_workflow(
   dev_predictions = dev_predictions.detach().numpy()
 
   ## Trading
-  test_s1_shortened = test_multivariate['S1_close'].iloc[look_back:]
-  test_s2_shortened = test_multivariate['S2_close'].iloc[look_back:] # use multivariate versions, so we can still access cols like 'S1_close' and 'S2_close'
+  test_s1_shortened = test_multivariate[col_s1].iloc[look_back:]
+  test_s2_shortened = test_multivariate[col_s2].iloc[look_back:] # use multivariate versions, so we can still access cols like 'S1_close' and 'S2_close'
   test_index_shortened = test_multivariate.index[look_back:] # officially doesn't really matter whether to use `test_multivariate` or `test`, but do it like this for consistency
   forecast_test_shortened_series = pd.Series(predictions, index=test_index_shortened)
-  gt_test_shortened_series = pd.Series(testY_raw.numpy()[look_back:], index=test_index_shortened)
+  gt_test_shortened_series = pd.Series(test_scaled.numpy()[look_back:], index=test_index_shortened)
 
   gt_returns = trade(
       S1 = test_s1_shortened,
@@ -232,7 +231,7 @@ def execute_timemoe_workflow(
       position_threshold = 1.0,
       clearing_threshold = 0.5
   )
-  gt_yoy = ((gt_returns[-1] / gt_returns[0])**(365 / len(gt_returns)) - 1)
+  gt_yoy = ((gt_returns[-1] / gt_returns[0])**(yearly_trading_days / len(gt_returns)) - 1)
 
   ## Trading: Mean YoY
   min_position = 2.00
@@ -251,33 +250,12 @@ def execute_timemoe_workflow(
   if not os.path.exists(result_dir):
       os.makedirs(result_dir)
 
-  ### Plotting #####
-  # (no train/val loss plot, as Time-MoE repo did not support plots or even supplying val losses during training)
-  train_val_loss_filename = None
-
-  # 1. yoy returns
-  yoy_returns_filename = plot_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, test_index_shortened, look_back, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
-
-  # 2. predicted vs actual spread plot
-  predicted_vs_actual_spread_filename = plot_comparison(gt_test_shortened_series, forecast_test_shortened_series, test_index_shortened, workflow_type="Time-MoE", pair_tup_str=pair_tup_str, verbose=verbose, result_dir=result_dir, filename_base=filename_base)
-
-  ### Plotting #####
-
-  dev_mse = mean_squared_error(devY_raw.numpy()[look_back:], dev_predictions)
-  test_mse = mean_squared_error(testY_raw.numpy()[look_back:], predictions)
-  dev_variance = devY_raw.numpy()[look_back:].var()
+  dev_mse = mean_squared_error(dev_raw.numpy()[look_back:], dev_predictions)
+  test_mse = mean_squared_error(test_raw.numpy()[look_back:], predictions)
+  dev_variance = dev_raw.numpy()[look_back:].var()
   dev_nmse = dev_mse / dev_variance if dev_variance != 0 else float('inf')
-  test_variance = testY_raw.numpy()[look_back:].var()
+  test_variance = test_raw.numpy()[look_back:].var()
   test_nmse = test_mse / test_variance if test_variance != 0 else float('inf')
-
-  # if return_predicted_spread:
-  #   return forecast_test_shortened_series, test_nmse
-
-  plot_filenames = {
-      "yoy_returns": yoy_returns_filename,
-      "predicted_vs_actual_spread": predicted_vs_actual_spread_filename,
-      "train_val_loss": train_val_loss_filename
-  }
 
   output: Dict[str, Any] = dict(
       val_mse=dev_nmse,
@@ -286,7 +264,6 @@ def execute_timemoe_workflow(
       yoy_std=yoy_std,
       gt_yoy=gt_yoy,
       result_parent_dir=result_parent_dir,
-      plot_filenames=plot_filenames
   )
 
   results_str = f"""
@@ -296,11 +273,19 @@ def execute_timemoe_workflow(
   YOY Std: +- {output['yoy_std'] * 100:.2f}%
   GT Yoy: {output['gt_yoy'] * 100:.2f}%
   Plot filepath parent dir: {output['result_parent_dir']}
-  Plot filenames: {output['plot_filenames']}
   """
 
   with open(os.path.join(result_dir, "results.txt"), "w") as f:
       f.write(results_str)
   if verbose:
     print(results_str)
+  if return_datasets:
+      output.update(
+          dict(
+            test_s1_shortened=test_s1_shortened, 
+            test_s2_shortened=test_s2_shortened, 
+            forecast_test_shortened_series=forecast_test_shortened_series, 
+            gt_test_shortened_series=gt_test_shortened_series
+          )
+      )
   return output

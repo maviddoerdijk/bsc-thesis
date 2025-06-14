@@ -100,18 +100,18 @@ def execute_kalman_workflow(
   dev_frac: float = 0.05,
   seed: int = 3178749, # for reproducibility, my student number
   look_back: int = 1,
-  normalise_fn: Callable[[pd.Series], pd.Series] = default_normalize,
   yearly_trading_days: int = 252,
+  ## optimized hyperparams ##
   delta: float = 1e-3,
   obs_cov_reg: float = 2.,
   trans_cov_avg: float = 0.01,
   obs_cov_avg: float = 1.,
+  ## optimized hyperparams ##
   return_datasets: bool = False,
   verbose: bool = True,
   result_parent_dir: str = "data/results",
   filename_base: str = "data_begindate_enddate_hash.pkl", # use `_get_filename(startDateStr, endDateStr, instrumentIds)`
   pair_tup_str: str = "(?,?)", # Used for showing which tuple was used in plots, example: "(QQQ, SPY)"
-  return_predicted_spread: bool = False
 ):
   # Set seeds
   torch.manual_seed(seed)
@@ -172,22 +172,21 @@ def execute_kalman_workflow(
       obs_cov=obs_cov_reg
   )[:, 0]
 
-  predictions = normalise_fn(
-      pairs_timeseries_scaled[col_s1] + pairs_timeseries_scaled[col_s2] * beta_t)
+  normed_predictions = pairs_timeseries_scaled[col_s1] + pairs_timeseries_scaled[col_s2] * beta_t
 
   if len(beta_t) != len(pairs_timeseries_scaled):
     raise Exception("Sanity check failed: len(beta_t) != len(pairs_timeseries_scaled)")
 
-  forecast_train = predictions[:len(train_scaled)].to_numpy() # Though the variable `forecast_train` is never directly used as a variable, the data for it WAS used, during kalman filter averaging and regression
-  forecast_dev   = predictions[len(train_scaled):len(train_scaled) + len(dev_scaled)].to_numpy()
-  forecast_test = predictions[-len(test_scaled):].to_numpy()
+  forecast_train_normed = normed_predictions[:len(train_scaled)].to_numpy() # Though the variable `forecast_train` is never directly used as a variable, the data for it WAS used, during kalman filter averaging and regression
+  forecast_dev_normed  = normed_predictions[len(train_scaled):len(train_scaled) + len(dev_scaled)].to_numpy()
+  forecast_test_normed = normed_predictions[-len(test_scaled):].to_numpy()
 
   if look_back == 1:
       # Calculate mse values
       groundtruth_test = pairs_timeseries[target_col].iloc[-len(test_multivariate):]
       # format into wanted form for `acc_metric` function
       groundtruth_test_formatted = np.array([[v] for v in groundtruth_test])
-      forecast_test_original_scale = forecast_test * test_std + test_mean
+      forecast_test_original_scale = forecast_test_normed * test_std + test_mean
       forecast_test_formatted = np.array([[v] for v in forecast_test_original_scale])
 
       test_mse = acc_metric(groundtruth_test_formatted, forecast_test_formatted)
@@ -197,7 +196,7 @@ def execute_kalman_workflow(
       # also for validation
       groundtruth_dev = pairs_timeseries[target_col].iloc[len(train_multivariate):len(train_multivariate) + len(dev_multivariate)]
       groundtruth_dev_formatted = np.array([[v] for v in groundtruth_dev])
-      forecast_dev_original_scale = forecast_dev * dev_std + dev_mean
+      forecast_dev_original_scale = forecast_dev_normed * dev_std + dev_mean
       forecast_dev_formatted = np.array([[v] for v in forecast_dev_original_scale])
 
       val_mse = acc_metric(groundtruth_dev_formatted, forecast_dev_formatted)
@@ -219,22 +218,19 @@ def execute_kalman_workflow(
   clearing_thresholds = np.linspace(min_clearing, max_clearing, num=10)
 
   test_index_shortened = test_multivariate.iloc[look_back:].index
-  forecast_test_shortened_series = pd.Series(forecast_test, index=test_index_shortened)
+  forecast_test_shortened_series = pd.Series(forecast_test_original_scale, index=test_index_shortened)
   test_s1_shortened = test_multivariate['S1_close'].iloc[look_back:]
   test_s2_shortened = test_multivariate['S2_close'].iloc[look_back:]
-
-  if return_predicted_spread:
-    return forecast_test_shortened_series, test_nmse
 
   yoy_mean, yoy_std = calculate_return_uncertainty(test_s1_shortened, test_s2_shortened, forecast_test_shortened_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, yearly_trading_days=yearly_trading_days)
   # calculate the strategy returns if we were to feed the groundtruth values to the `trade` func. If the ground truth returns are lower, it seems likely there is something wrong with the `trade` func (but not certain! Probability applies here).
   # forecast_test_shortened = forecast_test[:len(testY_untr)]
   # spread_pred_series = pd.Series(forecast_test_shortened, index=index_shortened)
-  spread_gt_series_shortened = pd.Series(test_multivariate['Spread_Close'].values[look_back:], index=test_index_shortened)
+  gt_test_shortened_series = pd.Series(test_multivariate['Spread_Close'].values[look_back:], index=test_index_shortened)
   gt_returns = trade(
       S1 = test_s1_shortened,
       S2 = test_s2_shortened,
-      spread = spread_gt_series_shortened,
+      spread = gt_test_shortened_series,
       window_long = 30,
       window_short = 5,
       position_threshold = 3,
@@ -247,8 +243,6 @@ def execute_kalman_workflow(
   if not os.path.exists(result_dir):
       os.makedirs(result_dir)
 
-  if verbose:
-    print(results_str)
   output: Dict[str, Any] = dict(
       val_mse=val_nmse,
       test_mse=test_nmse,
@@ -269,13 +263,15 @@ def execute_kalman_workflow(
   """
   with open(os.path.join(result_dir, "results.txt"), "w") as f:
       f.write(results_str)
+  if verbose:
+    print(results_str)
   if return_datasets:
       output.update(
           dict(
             test_s1_shortened=test_s1_shortened, 
             test_s2_shortened=test_s2_shortened, 
             forecast_test_shortened_series=forecast_test_shortened_series, 
-            spread_gt_series_shortened=spread_gt_series_shortened
+            gt_test_shortened_series=gt_test_shortened_series
           )
       )
   return output
