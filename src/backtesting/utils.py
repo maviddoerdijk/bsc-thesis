@@ -3,7 +3,7 @@ import itertools
 from backtesting.trading_strategy import trade
 
 def calculate_return_uncertainty(S1, S2, spread_pred_series, position_thresholds=None, clearing_thresholds=None,
-                          long_windows=None, short_windows=None, return_for_plotting=False):
+                          long_windows=None, short_windows=None, yearly_trading_days=252, return_for_plotting=False):
   if position_thresholds is not None and clearing_thresholds is not None:
       threshold_combinations = list(itertools.product(position_thresholds, clearing_thresholds))
       param_type = 'thresholds'
@@ -50,4 +50,4 @@ def calculate_return_uncertainty(S1, S2, spread_pred_series, position_thresholds
   std_dev_pct = (std_returns / mean_returns[0]) * 100
   if return_for_plotting:
     return np.vstack([np.array(r) for r in all_returns]), param_type
-  return ((mean_returns[-1] / mean_returns[0])**(365 / len(mean_returns)) - 1), ((std_returns[-1] / mean_returns[0]) * np.sqrt(365 / len(mean_returns)))
+  return ((mean_returns[-1] / mean_returns[0])**(yearly_trading_days / len(mean_returns)) - 1), ((std_returns[-1] / mean_returns[0]) * np.sqrt(yearly_trading_days / len(mean_returns)))
