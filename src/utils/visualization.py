@@ -85,3 +85,67 @@ def plot_train_val_loss(train_losses, val_losses, workflow_type="Unknown Workflo
   if verbose:
       print(f"Saved plot to {filepath}")
   return filename
+
+def results_to_latex(results):
+    headers = [
+        "Pair",
+        "Cointegration Score",
+        "val MSE",
+        "test MSE",
+        "YoY Returns (std)",
+        "\makecell{Theoretical Return\\\\Under Perfect\\\\Information}",
+        "Return Score"
+    ]
+    # Latex column alignment: l for first col, c for others
+    align_str = "l" + "c" * (len(headers)-1)
+    # Begin building latex table string
+    lines = []
+    lines.append("\\begin{table}[h]")
+    lines.append("\\centering")
+    lines.append("\\small")
+    lines.append("\\resizebox{\\textwidth}{!}{")
+    lines.append("\\begin{tabular}{" + align_str + "}")
+    lines.append("\\toprule")
+    lines.append(" & ".join(headers) + " \\\\")
+    lines.append("\\midrule")
+    for idx, row in enumerate(results):
+        row_out = []
+        for col_idx, cell in enumerate(row):
+            # Add numbering for pairs
+            if col_idx == 0:
+                cell = f"{idx+1}. {cell}"
+            # Format cointegration score as scientific in latex
+            elif col_idx == 1 and isinstance(cell, float):
+                base, exp = f"{cell:.2e}".split("e")
+                exp = int(exp)
+                cell = f"${base}\\times 10^{{{exp}}}$"
+            # Theoretical return: show as percent if small, otherwise keep as float
+            elif col_idx == 5 and isinstance(cell, float):
+                cell = f"{cell*100:.2f}\\%"
+                if "-100" in cell:
+                  cell = "TLOE*"
+            # Format YoY Returns (std) as $a\% \pm b\%$
+            elif col_idx == 4 and isinstance(cell, str) and "%" in cell:
+                # Convert e.g. '-82.63% +- 30.20%' to latex: $-82.63\% \pm 30.20\%$
+                cell = cell.replace("%", "\\%")
+                cell = cell.replace("+-", "\\pm")
+                cell = f"${cell}$"
+                if "-100" in cell:
+                  cell = "TLOE*"
+            elif col_idx == 6 and isinstance(cell, float):
+              cell = f"{cell:.2f}"
+            # General float formatting
+            elif isinstance(cell, float):
+                cell = f"{cell:.5f}"
+            # Replace % in any string field (needed for e.g. theoretical return if not float)
+            elif isinstance(cell, str) and "%" in cell:
+                cell = cell.replace("%", "\\%")
+            row_out.append(cell)
+        # Join and add row
+        lines.append(" & ".join(str(x) for x in row_out) + " \\\\")
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append("}")
+    lines.append("\\caption{Model performance and return statistics for all tested pairs.}")
+    lines.append("\\end{table}")
+    return "\n".join(lines)

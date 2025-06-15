@@ -1,4 +1,5 @@
 from datetime import datetime
+import numpy as np
 
 def _get_train_dev_frac(startDateStr, endDateStr, startDateStrTest, endDateStrTest, verbose=False):
   """
@@ -24,3 +25,10 @@ def _get_train_dev_frac(startDateStr, endDateStr, startDateStrTest, endDateStrTe
     print(f"test_frac: {test_frac}")
 
   return train_frac, dev_frac
+
+def return_score(yoy_mean, gt_yoy):
+  if gt_yoy == -1:
+    return np.nan
+  if yoy_mean == -1:
+    return -1
+  return round((1 + yoy_mean) / (1 + gt_yoy), 2)
