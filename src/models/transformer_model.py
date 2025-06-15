@@ -2,6 +2,7 @@ from typing import Optional, Callable, Dict, Any
 import os
 import numpy as np
 import pandas as pd
+from sklearn.metrics import mean_squared_error
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -148,7 +149,7 @@ def execute_transformer_workflow(
   if verbose:
       print(f"Split sizes — train: {len(train_univariate)}, dev: {len(dev_univariate)}, test: {len(test_univariate)}")
     
-  def create_sequences_rolling(series, look_back):
+  def create_sequences_rolling(series, look_back, mean=None, std=None):
       X = []
       y = []
       for i in range(len(series) - look_back):
@@ -168,9 +169,9 @@ def execute_transformer_workflow(
       y_scaled = (y - mean) / (std + 1e-8) 
       return X, X_scaled, y, y_scaled, mean, std # rolling X (pure python), rolling X (torch tensor), torch series, scaled torch series, float, float   
 
-  trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences_rolling(train_univariate, look_back=look_back)
-  devX_raw, devX_scaled, devY_raw, devY_scaled, _, _ = create_sequences_rolling(dev_univariate, look_back=look_back)
-  testX_raw, testX_scaled, testY_raw, testY_scaled, _, _ = create_sequences_rolling(test_univariate, look_back=look_back)
+  trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences_rolling(train_univariate, look_back)
+  devX_raw, devX_scaled, devY_raw, devY_scaled, _, _ = create_sequences_rolling(dev_univariate, look_back, train_mean, train_std)
+  testX_raw, testX_scaled, testY_raw, testY_scaled, _, _ = create_sequences_rolling(test_univariate, look_back, train_mean, train_std)
 
 
   # use pytorch Dataset class
@@ -296,20 +297,20 @@ def execute_transformer_workflow(
   ## GETTING MSE's
   # VAL (DEV)
   val_preds_scaled, val_targets_scaled = get_preds_targets_scaled(dev_loader, model, DEVICE)
-  val_mse_before_inverse = np.mean((val_preds_scaled - val_targets_scaled) ** 2)
+  val_mse_before_inverse = mean_squared_error(val_targets_scaled, val_preds_scaled)
   # Inverse-transform to original space
   val_preds_original_scale = val_preds_scaled * train_std + train_mean
   val_targets_original_scale = val_targets_scaled * train_std + train_mean
-  val_mse_after_inverse = np.mean((val_preds_original_scale - val_targets_original_scale) ** 2)
+  val_mse_after_inverse = mean_squared_error(val_targets_original_scale, val_preds_original_scale)
   val_var = np.var(val_targets_original_scale)
   val_nmse = val_mse_after_inverse / val_var # normalized mean squared error
 
   # TEST
   test_preds_scaled, test_targets_scaled = get_preds_targets_scaled(test_loader, model, DEVICE)
-  test_mse_before_inverse = np.mean((test_preds_scaled - test_targets_scaled) ** 2)
+  test_mse_before_inverse = mean_squared_error(test_preds_scaled)
   test_preds_original_scale = test_preds_scaled * train_std + train_mean
   test_targets_original_scale = test_targets_scaled * train_std + train_mean
-  test_mse_after_inverse = np.mean((test_preds_original_scale - test_targets_original_scale) ** 2)
+  test_mse_after_inverse = mean_squared_error(test_targets_original_scale, test_preds_original_scale)
   test_var = np.var(test_targets_original_scale)
   test_nmse = test_mse_after_inverse / test_var
 

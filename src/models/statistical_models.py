@@ -11,18 +11,6 @@ import random
 from backtesting.trading_strategy import get_gt_yoy_returns_test_dev
 from backtesting.utils import calculate_return_uncertainty
 
-def acc_metric(true_value: Sequence[np.ndarray],
-               predicted_value: Sequence[np.ndarray]) -> float:
-    """
-    Legacy RMSE scorer used in the original script:
-    both inputs are **lists of 1-D arrays** (len == look_back).
-    """
-    acc_met = 0.0
-    m = len(true_value)
-    for i in range(m):
-        acc_met += mean_squared_error(true_value[i], predicted_value[i])
-    return np.sqrt(acc_met / m)
-
 def kalman_filter_average(x: pd.Series,
                           transition_cov: float = 0.01,
                           obs_cov: float = 1.) -> pd.Series:
@@ -108,16 +96,19 @@ def execute_kalman_workflow(
   if verbose:
       print(f"Split sizes — train: {len(train_univariate)}, dev: {len(dev_univariate)}, test: {len(test_univariate)}")
       
-  def create_sequences(series):
+  def create_sequences(series, mean=None, std=None):
       # series: pd.Series
-      mean = series.mean()
-      std = series.std()
+      if mean is None:
+        # only compute mean if not given
+        mean = series.mean()
+      if std is None:
+        std = series.std()
       series_scaled = (series - mean) / (std + 1e-8)
       return series_scaled, mean, std
 
   train_scaled, train_mean, train_std = create_sequences(train_multivariate)  
-  dev_scaled, _, _ = create_sequences(dev_multivariate)
-  test_scaled, _, _ = create_sequences(test_multivariate) # Note: to prevent data leakage, means and std's of test and dev may not be used.
+  dev_scaled, _, _ = create_sequences(dev_multivariate, train_mean, train_std)
+  test_scaled, _, _ = create_sequences(test_multivariate, train_mean, train_std) # Note: to prevent data leakage, means and std's of test and dev may not be used.
 
   pairs_timeseries_scaled = pd.concat([train_scaled, dev_scaled, test_scaled])
 
@@ -147,21 +138,17 @@ def execute_kalman_workflow(
       # Calculate mse values
       groundtruth_test = pairs_timeseries[target_col].iloc[-len(test_multivariate):]
       # format into wanted form for `acc_metric` function
-      groundtruth_test_formatted = np.array([[v] for v in groundtruth_test])
       forecast_test_original_scale = forecast_test_normed * train_std + train_mean
-      forecast_test_formatted = np.array([[v] for v in forecast_test_original_scale])
 
-      test_mse = acc_metric(groundtruth_test_formatted, forecast_test_formatted)
+      test_mse = mean_squared_error(groundtruth_test, forecast_test_original_scale)
       test_var = np.var(groundtruth_test)
       test_nmse = test_mse / test_var if test_var != 0 else 0.0
 
       # also for validation
       groundtruth_dev = pairs_timeseries[target_col].iloc[len(train_multivariate):len(train_multivariate) + len(dev_multivariate)]
-      groundtruth_dev_formatted = np.array([[v] for v in groundtruth_dev])
       forecast_dev_original_scale = forecast_dev_normed * train_std + train_mean
-      forecast_dev_formatted = np.array([[v] for v in forecast_dev_original_scale])
 
-      val_mse = acc_metric(groundtruth_dev_formatted, forecast_dev_formatted)
+      val_mse = mean_squared_error(groundtruth_dev, forecast_dev_original_scale)
       val_var = np.var(groundtruth_dev)
       val_nmse = val_mse / val_var if val_var != 0 else 0.
   else:

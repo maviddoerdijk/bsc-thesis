@@ -82,15 +82,18 @@ def execute_timemoe_workflow(
   if verbose:
     print(f"Using device: {DEVICE}")
 
-  def create_sequences(series):
+  def create_sequences(series, mean=None, std=None):
       # series: pd.Series
       X_raw = torch.tensor(series.values, dtype=torch.float32) # note: using .values loses index
-      mean = X_raw.mean()
-      std = X_raw.std()
+      if mean is None:
+        # only compute mean if not given
+        mean = X_raw.mean()
+      if std is None:
+        std = X_raw.std()
       X_scaled = (X_raw - mean) / (std + 1e-8)
       return X_raw, X_scaled, mean, std
 
-  def create_sequences_rolling(series, look_back):
+  def create_sequences_rolling(series, look_back, mean=None, std=None):
       X = []
       y = []
       for i in range(len(series) - look_back):
@@ -103,21 +106,23 @@ def execute_timemoe_workflow(
       y = torch.tensor(y, dtype=torch.float32)
       
       # z-score normalization
-      mean = series.mean()
-      std = series.std()
+      if mean is None:
+        mean = series.mean()
+      if std is None:
+        std = series.std()
       X_scaled = (X - mean) / (std + 1e-8)
       # For y, broadcast mean/std to match shape
       y_scaled = (y - mean) / (std + 1e-8) 
       return X, X_scaled, y, y_scaled, mean, std # rolling X (pure python), rolling X (torch tensor), torch series, scaled torch series, float, float   
 
-  train_raw, train_scaled, train_mean, train_std = create_sequences(train_univariate) #, look_back)
-  dev_raw, dev_scaled, dev_mean, dev_std = create_sequences(dev_univariate)# , look_back)
-  test_raw, test_scaled, test_mean, test_std = create_sequences(test_univariate) #, look_back) 
+  train_raw, train_scaled, train_mean, train_std = create_sequences(train_univariate) 
+  dev_raw, dev_scaled, _, _ = create_sequences(dev_univariate, train_mean, train_std)
+  test_raw, test_scaled, _, _ = create_sequences(test_univariate, train_mean, train_std)  
 
   ## use rolling sequences not for training, but still for inferencing dev and test ##
-  trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences_rolling(train_univariate, look_back=look_back)
-  devX_raw_rolling, devX_scaled_rolling, devY_raw_rolling, devY_scaled_rolling, _, _ = create_sequences_rolling(dev_univariate, look_back)
-  testX_raw_rolling, testX_scaled_rolling, testY_raw_rolling, testY_scaled_rolling, _, _ = create_sequences_rolling(test_univariate, look_back) # Note: dev_mean and test_mean may never be used; preventing data leakage
+  trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences_rolling(train_univariate, look_back)
+  devX_raw_rolling, devX_scaled_rolling, devY_raw_rolling, devY_scaled_rolling, _, _ = create_sequences_rolling(dev_univariate, look_back, train_mean, train_std)
+  testX_raw_rolling, testX_scaled_rolling, testY_raw_rolling, testY_scaled_rolling, _, _ = create_sequences_rolling(test_univariate, look_back, train_mean, train_std) # Note: dev_mean and test_mean may never be used; preventing data leakage
 
   dev_ds_rolling = TensorDataset(devX_scaled_rolling, devY_scaled_rolling) # goal of TensorDataset class: loading and processing dataset lazily
   test_ds_rolling = TensorDataset(testX_scaled_rolling, testY_scaled_rolling)
