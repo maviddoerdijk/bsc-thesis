@@ -109,6 +109,7 @@ def execute_kalman_workflow(
   train_scaled, train_mean, train_std = create_sequences(train_multivariate)  
   dev_scaled, _, _ = create_sequences(dev_multivariate, train_mean, train_std)
   test_scaled, _, _ = create_sequences(test_multivariate, train_mean, train_std) # Note: to prevent data leakage, means and std's of test and dev may not be used.
+  train_mean_target, train_std_target = train_mean[target_col], train_std[target_col]
 
   pairs_timeseries_scaled = pd.concat([train_scaled, dev_scaled, test_scaled])
 
@@ -138,7 +139,7 @@ def execute_kalman_workflow(
       # Calculate mse values
       groundtruth_test = pairs_timeseries[target_col].iloc[-len(test_multivariate):] # get groundtruth in original scalee
       # format into wanted form for `acc_metric` function
-      forecast_test_original_scale = forecast_test_normed * train_std + train_mean
+      forecast_test_original_scale = forecast_test_normed * train_std_target + train_mean_target
 
       test_mse = mean_squared_error(groundtruth_test, forecast_test_original_scale)
       test_var = np.var(groundtruth_test)
@@ -146,7 +147,7 @@ def execute_kalman_workflow(
 
       # also for validation
       groundtruth_dev = pairs_timeseries[target_col].iloc[len(train_multivariate):len(train_multivariate) + len(dev_multivariate)]
-      forecast_dev_original_scale = forecast_dev_normed * train_std + train_mean
+      forecast_dev_original_scale = forecast_dev_normed * train_std_target + train_mean_target
 
       val_mse = mean_squared_error(groundtruth_dev, forecast_dev_original_scale)
       val_var = np.var(groundtruth_dev)
@@ -174,7 +175,7 @@ def execute_kalman_workflow(
   # forecast_test_shortened = forecast_test[:len(testY_untr)]
   # spread_pred_series = pd.Series(forecast_test_shortened, index=index_shortened)
   gt_test_series = pd.Series(test_multivariate['Spread_Close'].values, index=test_index)
-  output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=0, yearly_trading_day=yearly_trading_days)
+  output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=0, yearly_trading_days=yearly_trading_days)
   gt_yoy, gt_yoy_for_dev_dataset = output['gt_yoy_test'], output['gt_yoy_dev']
 
   current_result_dir = filename_base.replace(".pkl", "_kalman")  

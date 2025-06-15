@@ -159,11 +159,13 @@ def execute_transformer_workflow(
           y.append(target) 
 
       X = torch.tensor(X, dtype=torch.float32)
-      y = torch.tensor(y, dtype=torch.float32)
+      y = torch.tensor(np.array(y), dtype=torch.float32)  
       
       # z-score normalization
-      mean = series.mean()
-      std = series.std()
+      if mean is None:
+        mean = torch.tensor(np.array(series.mean()), dtype=torch.float32)
+      if std is None:
+        std = torch.tensor(np.array(series.std()), dtype=torch.float32)
       X_scaled = (X - mean) / (std + 1e-8)
       # For y, broadcast mean/std to match shape
       y_scaled = (y - mean) / (std + 1e-8) 
@@ -215,7 +217,8 @@ def execute_transformer_workflow(
     optimizer=optimizer,
     num_warmup_steps=num_warmup_steps,
     num_training_steps=num_training_steps,
-    min_lr=min_learning_rate
+    min_lr=min_learning_rate,
+    lr=learning_rate
   )
 
   EPOCHS = epochs
@@ -295,9 +298,10 @@ def execute_transformer_workflow(
       return all_preds, all_targets
 
   ## GETTING MSE's
+  # turn train_std and train_mean into numpy arrays, because torch tensors cannot be used in combination with np
+  train_mean, train_std = np.array(train_mean), np.array(train_std)
   # VAL (DEV)
   val_preds_scaled, val_targets_scaled = get_preds_targets_scaled(dev_loader, model, DEVICE)
-  val_mse_before_inverse = mean_squared_error(val_targets_scaled, val_preds_scaled)
   # Inverse-transform to original space
   val_preds_original_scale = val_preds_scaled * train_std + train_mean
   val_targets_original_scale = val_targets_scaled * train_std + train_mean
@@ -307,7 +311,6 @@ def execute_transformer_workflow(
 
   # TEST
   test_preds_scaled, test_targets_scaled = get_preds_targets_scaled(test_loader, model, DEVICE)
-  test_mse_before_inverse = mean_squared_error(test_preds_scaled)
   test_preds_original_scale = test_preds_scaled * train_std + train_mean
   test_targets_original_scale = test_targets_scaled * train_std + train_mean
   test_mse_after_inverse = mean_squared_error(test_targets_original_scale, test_preds_original_scale)

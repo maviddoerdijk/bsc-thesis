@@ -87,9 +87,9 @@ def execute_timemoe_workflow(
       X_raw = torch.tensor(series.values, dtype=torch.float32) # note: using .values loses index
       if mean is None:
         # only compute mean if not given
-        mean = series.mean()
+        mean = torch.tensor(np.array(series.mean()), dtype=torch.float32)
       if std is None:
-        std = series.std()
+        std = torch.tensor(np.array(series.std()), dtype=torch.float32)
       X_scaled = (X_raw - mean) / (std + 1e-8)
       return X_raw, X_scaled, mean, std
 
@@ -103,13 +103,13 @@ def execute_timemoe_workflow(
           y.append(target) 
 
       X = torch.tensor(X, dtype=torch.float32)
-      y = torch.tensor(y, dtype=torch.float32)
+      y = torch.tensor(np.array(y), dtype=torch.float32)
       
       # z-score normalization
       if mean is None:
-        mean = series.mean()
+        mean = torch.tensor(np.array(series.mean()), dtype=torch.float32)
       if std is None:
-        std = series.std()
+        std = torch.tensor(np.array(series.std()), dtype=torch.float32)
       X_scaled = (X - mean) / (std + 1e-8)
       # For y, broadcast mean/std to match shape
       y_scaled = (y - mean) / (std + 1e-8) 
@@ -215,7 +215,7 @@ def execute_timemoe_workflow(
   forecast_test_shortened_series = pd.Series(predictions, index=test_index_shortened)
   gt_test_shortened_series = pd.Series(test_raw.numpy()[look_back:], index=test_index_shortened)
 
-  output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=20, yearly_trading_day=yearly_trading_days)
+  output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=20, yearly_trading_days=yearly_trading_days)
   gt_yoy, gt_yoy_for_dev_dataset = output['gt_yoy_test'], output['gt_yoy_dev']
   
   ## Trading: Mean YoY
