@@ -87,9 +87,9 @@ def execute_timemoe_workflow(
       X_raw = torch.tensor(series.values, dtype=torch.float32) # note: using .values loses index
       if mean is None:
         # only compute mean if not given
-        mean = X_raw.mean()
+        mean = series.mean()
       if std is None:
-        std = X_raw.std()
+        std = series.std()
       X_scaled = (X_raw - mean) / (std + 1e-8)
       return X_raw, X_scaled, mean, std
 
@@ -113,7 +113,7 @@ def execute_timemoe_workflow(
       X_scaled = (X - mean) / (std + 1e-8)
       # For y, broadcast mean/std to match shape
       y_scaled = (y - mean) / (std + 1e-8) 
-      return X, X_scaled, y, y_scaled, mean, std # rolling X (pure python), rolling X (torch tensor), torch series, scaled torch series, float, float   
+      return X, X_scaled, y, y_scaled, mean, std # rolling X (torch tensor), rolling X (torch tensor), torch series, scaled torch series, float, float   
 
   train_raw, train_scaled, train_mean, train_std = create_sequences(train_univariate) 
   dev_raw, dev_scaled, _, _ = create_sequences(dev_univariate, train_mean, train_std)
@@ -213,7 +213,7 @@ def execute_timemoe_workflow(
   test_s2_shortened = test_multivariate[col_s2].iloc[look_back:] # use multivariate versions, so we can still access cols like 'S1_close' and 'S2_close'
   test_index_shortened = test_multivariate.index[look_back:] # officially doesn't really matter whether to use `test_multivariate` or `test`, but do it like this for consistency
   forecast_test_shortened_series = pd.Series(predictions, index=test_index_shortened)
-  gt_test_shortened_series = pd.Series(test_scaled.numpy()[look_back:], index=test_index_shortened)
+  gt_test_shortened_series = pd.Series(test_raw.numpy()[look_back:], index=test_index_shortened)
 
   output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=20, yearly_trading_day=yearly_trading_days)
   gt_yoy, gt_yoy_for_dev_dataset = output['gt_yoy_test'], output['gt_yoy_dev']
@@ -252,12 +252,13 @@ def execute_timemoe_workflow(
   )
 
   results_str = f"""
-  Validation MSE: {output['val_mse']}
-  Test MSE: {output['test_mse']}
-  YOY Returns: {output['yoy_mean'] * 100:.2f}%
-  YOY Std: +- {output['yoy_std'] * 100:.2f}%
-  GT Yoy: {output['gt_yoy'] * 100:.2f}%
-  Plot filepath parent dir: {output['result_parent_dir']}
+Validation MSE: {output['val_mse']}
+Test MSE: {output['test_mse']}
+YOY Returns: {output['yoy_mean'] * 100:.2f}%
+YOY Std: +- {output['yoy_std'] * 100:.2f}%
+GT Yoy: {output['gt_yoy'] * 100:.2f}%
+Plot filepath parent dir: {output['result_parent_dir']}
+pair_tup_str: {pair_tup_str}
   """
 
   with open(os.path.join(result_dir, "results.txt"), "w") as f:

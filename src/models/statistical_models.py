@@ -136,7 +136,7 @@ def execute_kalman_workflow(
 
   if look_back == 1:
       # Calculate mse values
-      groundtruth_test = pairs_timeseries[target_col].iloc[-len(test_multivariate):]
+      groundtruth_test = pairs_timeseries[target_col].iloc[-len(test_multivariate):] # get groundtruth in original scalee
       # format into wanted form for `acc_metric` function
       forecast_test_original_scale = forecast_test_normed * train_std + train_mean
 
@@ -192,13 +192,13 @@ def execute_kalman_workflow(
   )
   
   results_str = f"""
-  Validation MSE: {output['val_mse']}
-  Test MSE: {output['test_mse']}
-  YOY Returns: {output['yoy_mean'] * 100:.2f}%
-  YOY Std: +- {output['yoy_std'] * 100:.2f}%
-  GT Yoy: {output['gt_yoy'] * 100:.2f}%
-  Plot filepath parent dir: {output['result_parent_dir']}
-  pair_tup_str: {pair_tup_str}
+Validation MSE: {output['val_mse']}
+Test MSE: {output['test_mse']}
+YOY Returns: {output['yoy_mean'] * 100:.2f}%
+YOY Std: +- {output['yoy_std'] * 100:.2f}%
+GT Yoy: {output['gt_yoy'] * 100:.2f}%
+Plot filepath parent dir: {output['result_parent_dir']}
+pair_tup_str: {pair_tup_str}
   """
   with open(os.path.join(result_dir, "results.txt"), "w") as f:
       f.write(results_str)

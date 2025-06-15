@@ -167,7 +167,7 @@ def execute_transformer_workflow(
       X_scaled = (X - mean) / (std + 1e-8)
       # For y, broadcast mean/std to match shape
       y_scaled = (y - mean) / (std + 1e-8) 
-      return X, X_scaled, y, y_scaled, mean, std # rolling X (pure python), rolling X (torch tensor), torch series, scaled torch series, float, float   
+      return X, X_scaled, y, y_scaled, mean, std # rolling X (torch tensor), rolling X (torch tensor), torch series, scaled torch series, float, float   
 
   trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences_rolling(train_univariate, look_back)
   devX_raw, devX_scaled, devY_raw, devY_scaled, _, _ = create_sequences_rolling(dev_univariate, look_back, train_mean, train_std)
@@ -362,6 +362,7 @@ YOY Returns: {output['yoy_mean'] * 100:.2f}%
 YOY Std: +- {output['yoy_std'] * 100:.2f}%
 GT Yoy: {output['gt_yoy'] * 100:.2f}%
 Plot filepath parent dir: {output['result_parent_dir']}
+pair_tup_str: {pair_tup_str}
   """
   with open(os.path.join(result_dir, "results.txt"), "w") as f:
       f.write(results_str)
