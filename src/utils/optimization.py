@@ -81,8 +81,10 @@ def bayesian_optimize_workflow(
           )
           total_mse_list.append(output['test_mse'])
       # get mean_mse across time periods and pairs for the current choice of hyperparameters
-      print(f"total_mse_list: {total_mse_list}")
-      print(f"mean mse: {np.mean(total_mse_list)}")
+      if verbose:
+        print(f"total_mse_list: {total_mse_list}")
+        print(f"mean mse: {np.mean(total_mse_list)}")
+        print(f"Current hyperparameters: {params}")
       mean_mse = np.mean(total_mse_list)
       return mean_mse
 
