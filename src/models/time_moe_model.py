@@ -116,13 +116,13 @@ def execute_timemoe_workflow(
       return X, X_scaled, y, y_scaled, mean, std # rolling X (torch tensor), rolling X (torch tensor), torch series, scaled torch series, float, float   
 
   train_raw, train_scaled, train_mean, train_std = create_sequences(train_univariate) 
-  dev_raw, dev_scaled, _, _ = create_sequences(dev_univariate, train_mean, train_std)
-  test_raw, test_scaled, _, _ = create_sequences(test_univariate, train_mean, train_std)  
+  dev_raw, dev_scaled, dev_mean, dev_std = create_sequences(dev_univariate, train_mean, train_std)
+  test_raw, test_scaled, _, _ = create_sequences(test_univariate, dev_mean, dev_std)  
 
   ## use rolling sequences not for training, but still for inferencing dev and test ##
   trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences_rolling(train_univariate, look_back)
-  devX_raw_rolling, devX_scaled_rolling, devY_raw_rolling, devY_scaled_rolling, _, _ = create_sequences_rolling(dev_univariate, look_back, train_mean, train_std)
-  testX_raw_rolling, testX_scaled_rolling, testY_raw_rolling, testY_scaled_rolling, _, _ = create_sequences_rolling(test_univariate, look_back, train_mean, train_std) # Note: dev_mean and test_mean may never be used; preventing data leakage
+  devX_raw_rolling, devX_scaled_rolling, devY_raw_rolling, devY_scaled_rolling, dev_mean, dev_std = create_sequences_rolling(dev_univariate, look_back, train_mean, train_std)
+  testX_raw_rolling, testX_scaled_rolling, testY_raw_rolling, testY_scaled_rolling, _, _ = create_sequences_rolling(test_univariate, look_back, dev_mean, dev_std) # Note: dev_mean and test_mean may never be used; preventing data leakage
 
   dev_ds_rolling = TensorDataset(devX_scaled_rolling, devY_scaled_rolling) # goal of TensorDataset class: loading and processing dataset lazily
   test_ds_rolling = TensorDataset(testX_scaled_rolling, testY_scaled_rolling)
@@ -184,7 +184,7 @@ def execute_timemoe_workflow(
     input_size_current = inputs.size()
     batch_size_current = input_size_current[0]
     
-    preds = normed_predictions * train_std + train_mean
+    preds = normed_predictions * dev_std + dev_mean
     all_predictions.append(preds)
 
   # Concatenate all predictions

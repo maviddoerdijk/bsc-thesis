@@ -172,8 +172,8 @@ def execute_transformer_workflow(
       return X, X_scaled, y, y_scaled, mean, std # rolling X (torch tensor), rolling X (torch tensor), torch series, scaled torch series, float, float   
 
   trainX_raw, trainX_scaled, trainY_raw, trainY_scaled, train_mean, train_std = create_sequences_rolling(train_univariate, look_back)
-  devX_raw, devX_scaled, devY_raw, devY_scaled, _, _ = create_sequences_rolling(dev_univariate, look_back, train_mean, train_std)
-  testX_raw, testX_scaled, testY_raw, testY_scaled, _, _ = create_sequences_rolling(test_univariate, look_back, train_mean, train_std)
+  devX_raw, devX_scaled, devY_raw, devY_scaled, dev_mean, dev_std = create_sequences_rolling(dev_univariate, look_back, train_mean, train_std)
+  testX_raw, testX_scaled, testY_raw, testY_scaled, _, _ = create_sequences_rolling(test_univariate, look_back, dev_mean, dev_std)
 
 
   # use pytorch Dataset class
@@ -300,6 +300,7 @@ def execute_transformer_workflow(
   ## GETTING MSE's
   # turn train_std and train_mean into numpy arrays, because torch tensors cannot be used in combination with np
   train_mean, train_std = np.array(train_mean), np.array(train_std)
+  dev_mean, dev_std = np.array(dev_mean), np.array(dev_std)
   # VAL (DEV)
   val_preds_scaled, val_targets_scaled = get_preds_targets_scaled(dev_loader, model, DEVICE)
   # Inverse-transform to original space
@@ -311,8 +312,8 @@ def execute_transformer_workflow(
 
   # TEST
   test_preds_scaled, test_targets_scaled = get_preds_targets_scaled(test_loader, model, DEVICE)
-  test_preds_original_scale = test_preds_scaled * train_std + train_mean
-  test_targets_original_scale = test_targets_scaled * train_std + train_mean
+  test_preds_original_scale = test_preds_scaled * dev_std + dev_mean
+  test_targets_original_scale = test_targets_scaled * dev_std + dev_mean
   test_mse_after_inverse = mean_squared_error(test_targets_original_scale, test_preds_original_scale)
   test_var = np.var(test_targets_original_scale)
   test_nmse = test_mse_after_inverse / test_var
@@ -321,8 +322,8 @@ def execute_transformer_workflow(
   y_hat_scaled = np.concatenate(test_preds_scaled).reshape(-1, 1)
   y_true_scaled = np.concatenate(test_targets_scaled).reshape(-1, 1)
 
-  y_hat = y_hat_scaled * train_std + train_mean
-  y_true = y_true_scaled * train_std + train_mean
+  y_hat = y_hat_scaled * dev_std + dev_mean
+  y_true = y_true_scaled * dev_std + dev_mean
 
   ## Trading
   test_s1_shortened = test_multivariate[col_s1].iloc[look_back:]
