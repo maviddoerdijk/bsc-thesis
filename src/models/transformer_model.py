@@ -191,7 +191,11 @@ def execute_transformer_workflow(
   train_ds = SlidingWindowDataset(trainX_scaled, trainY_scaled)
   dev_ds   = SlidingWindowDataset(devX_scaled, devY_scaled)
   test_ds  = SlidingWindowDataset(testX_scaled, testY_scaled)
-
+  
+  # extra step after bug: make sure batch_size is int type
+  if not isinstance(batch_size, int):
+    print(f"Caught bug. batch_size was type {type(batch_size)}")
+  batch_size = int(batch_size)
   train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  drop_last=True, num_workers=0) # workers=0 causes it to be processed by main process (cpu)
   dev_loader   = DataLoader(dev_ds, batch_size=batch_size,shuffle=False, drop_last=False, num_workers=0)
   test_loader  = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=0)

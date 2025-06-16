@@ -127,6 +127,7 @@ def execute_timemoe_workflow(
   dev_ds_rolling = TensorDataset(devX_scaled_rolling, devY_scaled_rolling) # goal of TensorDataset class: loading and processing dataset lazily
   test_ds_rolling = TensorDataset(testX_scaled_rolling, testY_scaled_rolling)
 
+  batch_size = int(batch_size)
   dev_loader_rolling = DataLoader(dev_ds_rolling, batch_size=batch_size, shuffle=False)
   test_loader_rolling = DataLoader(test_ds_rolling, batch_size=batch_size, shuffle=False)
   ## use rolling sequences not for training, but still for inferencing dev and test ##
