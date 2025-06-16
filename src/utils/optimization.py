@@ -42,6 +42,8 @@ def bayesian_optimize_workflow(
     @use_named_args(search_space)
     def objective(**params):
       total_mse_list = []
+      if verbose:
+        print(f"Current hyperparameters: {params}")
 
       # time series cross validation: go over all periods
       for rolling_end_year in range(min_end_year, max_end_year + 1): # +1 such that end year is actually included!
@@ -84,7 +86,6 @@ def bayesian_optimize_workflow(
       if verbose:
         print(f"total_mse_list: {total_mse_list}")
         print(f"mean mse: {np.mean(total_mse_list)}")
-        print(f"Current hyperparameters: {params}")
       mean_mse = np.mean(total_mse_list)
       return mean_mse
 
