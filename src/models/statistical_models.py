@@ -92,65 +92,59 @@ def execute_kalman_workflow(
   train_multivariate = pairs_timeseries.iloc[:train_size]
   dev_multivariate = pairs_timeseries.iloc[train_size:train_size + dev_size]
   test_multivariate = pairs_timeseries.iloc[train_size + dev_size:]  
-
+  
   if verbose:
       print(f"Split sizes — train: {len(train_univariate)}, dev: {len(dev_univariate)}, test: {len(test_univariate)}")
       
-  def create_sequences(series, mean=None, std=None):
-      # series: pd.Series
-      if mean is None:
-        # only compute mean if not given
-        mean = series.mean()
-      if std is None:
-        std = series.std()
-      series_scaled = (series - mean) / (std + 1e-8)
-      return series_scaled, mean, std
-
-  train_scaled, train_mean, train_std = create_sequences(train_multivariate)  
-  dev_scaled, _, _ = create_sequences(dev_multivariate, train_mean, train_std)
-  test_scaled, _, _ = create_sequences(test_multivariate, train_mean, train_std) # Note: to prevent data leakage, means and std's of test and dev may not be used.
-  train_mean_target, train_std_target = train_mean[target_col], train_std[target_col]
-
-  pairs_timeseries_scaled = pd.concat([train_scaled, dev_scaled, test_scaled])
-
-  # get beta_t, the Kalman-filtered regression coefficients
-  # Note: since the three time series are scaled independently, there is not any lookahead bias
-  beta_t = kalman_filter_regression(
-      kalman_filter_average(pairs_timeseries_scaled[col_s1],
+  beta_t_train = kalman_filter_regression(
+      kalman_filter_average(train_multivariate[col_s1],
                             transition_cov=trans_cov_avg,
                             obs_cov=obs_cov_avg),
-      kalman_filter_average(pairs_timeseries_scaled[col_s2],
+      kalman_filter_average(train_multivariate[col_s2],
                             transition_cov=trans_cov_avg,
                             obs_cov=obs_cov_avg),
       delta=delta,
       obs_cov=obs_cov_reg
   )[:, 0]
+  forecast_train_raw = train_multivariate[col_s1] + train_multivariate[col_s2] * beta_t_train # merely used for scaling dev without lookahead bias
+      
+  # get dev forecasts
+  beta_t_dev = kalman_filter_regression(
+      kalman_filter_average(dev_multivariate[col_s1],
+                            transition_cov=trans_cov_avg,
+                            obs_cov=obs_cov_avg),
+      kalman_filter_average(dev_multivariate[col_s2],
+                            transition_cov=trans_cov_avg,
+                            obs_cov=obs_cov_avg),
+      delta=delta,
+      obs_cov=obs_cov_reg
+  )[:, 0]
+  forecast_dev_raw = dev_multivariate[col_s1] + dev_multivariate[col_s2] * beta_t_dev
+  forecast_dev = (forecast_dev_raw - forecast_train_raw.mean()) / forecast_train_raw.std()
 
-  normed_predictions = pairs_timeseries_scaled[col_s1] + pairs_timeseries_scaled[col_s2] * beta_t
-
-  if len(beta_t) != len(pairs_timeseries_scaled):
-    raise Exception("Sanity check failed: len(beta_t) != len(pairs_timeseries_scaled)")
-
-  forecast_train_normed = normed_predictions[:len(train_scaled)].to_numpy() # Though the variable `forecast_train` is never directly used as a variable, the data for it WAS used, during kalman filter averaging and regression
-  forecast_dev_normed  = normed_predictions[len(train_scaled):len(train_scaled) + len(dev_scaled)].to_numpy()
-  forecast_test_normed = normed_predictions[-len(test_scaled):].to_numpy()
+  # get test forecasts
+  beta_t_test = kalman_filter_regression(
+      kalman_filter_average(test_multivariate[col_s1],
+                            transition_cov=trans_cov_avg,
+                            obs_cov=obs_cov_avg),
+      kalman_filter_average(test_multivariate[col_s2],
+                            transition_cov=trans_cov_avg,
+                            obs_cov=obs_cov_avg),
+      delta=delta,
+      obs_cov=obs_cov_reg
+  )[:, 0]
+  forecast_test_raw = test_multivariate[col_s1] + test_multivariate[col_s2] * beta_t_test
+  forecast_test = (forecast_test_raw - forecast_dev_raw.mean()) / forecast_dev_raw.std()
 
   if look_back == 1:
       # Calculate mse values
-      groundtruth_test = pairs_timeseries[target_col].iloc[-len(test_multivariate):] # get groundtruth in original scalee
-      # format into wanted form for `acc_metric` function
-      forecast_test_original_scale = forecast_test_normed * train_std_target + train_mean_target
-
-      test_mse = mean_squared_error(groundtruth_test, forecast_test_original_scale)
-      test_var = np.var(groundtruth_test)
+      test_mse = mean_squared_error(test_univariate, forecast_test)
+      test_var = np.var(test_univariate)
       test_nmse = test_mse / test_var if test_var != 0 else 0.0
 
       # also for validation
-      groundtruth_dev = pairs_timeseries[target_col].iloc[len(train_multivariate):len(train_multivariate) + len(dev_multivariate)]
-      forecast_dev_original_scale = forecast_dev_normed * train_std_target + train_mean_target
-
-      val_mse = mean_squared_error(groundtruth_dev, forecast_dev_original_scale)
-      val_var = np.var(groundtruth_dev)
+      val_mse = mean_squared_error(dev_univariate, forecast_dev)
+      val_var = np.var(dev_univariate)
       val_nmse = val_mse / val_var if val_var != 0 else 0.
   else:
       raise NotImplementedError("Warning: look_back > 1 not yet implemented. Returning None for mse.")
@@ -165,24 +159,19 @@ def execute_kalman_workflow(
   position_thresholds = np.linspace(min_position, max_position, num=10)
   clearing_thresholds = np.linspace(min_clearing, max_clearing, num=10)
 
-  test_index = test_multivariate.index
-  forecast_test_series = pd.Series(forecast_test_original_scale, index=test_index)
   test_s1 = test_multivariate['S1_close']
   test_s2 = test_multivariate['S2_close']
 
-  yoy_mean, yoy_std = calculate_return_uncertainty(test_s1, test_s2, forecast_test_series, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds, yearly_trading_days=yearly_trading_days)
+  yoy_mean, yoy_std = calculate_return_uncertainty(test_s1, test_s2, forecast_test, position_thresholds=position_thresholds, clearing_thresholds=clearing_thresholds)
   # calculate the strategy returns if we were to feed the groundtruth values to the `trade` func. If the ground truth returns are lower, it seems likely there is something wrong with the `trade` func (but not certain! Probability applies here).
-  # forecast_test_shortened = forecast_test[:len(testY_untr)]
-  # spread_pred_series = pd.Series(forecast_test_shortened, index=index_shortened)
-  gt_test_series = pd.Series(test_multivariate['Spread_Close'].values, index=test_index)
   output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=0, yearly_trading_days=yearly_trading_days)
   gt_yoy, gt_yoy_for_dev_dataset = output['gt_yoy_test'], output['gt_yoy_dev']
-
-  current_result_dir = filename_base.replace(".pkl", "_kalman")  
+  
+  current_result_dir = filename_base.replace(".pkl", "_kalman")
   result_dir = os.path.join(result_parent_dir, current_result_dir)
   if not os.path.exists(result_dir):
       os.makedirs(result_dir)
-
+      
   output: Dict[str, Any] = dict(
       val_mse=val_nmse,
       test_mse=test_nmse,
@@ -208,10 +197,11 @@ pair_tup_str: {pair_tup_str}
   if return_datasets:
       output.update(
           dict(
+            pairs_timeseries=pairs_timeseries,
             test_s1_shortened=test_s1, 
             test_s2_shortened=test_s2, 
-            forecast_test_shortened_series=forecast_test_series, 
-            gt_test_shortened_series=gt_test_series
+            forecast_test_shortened_series=forecast_test, 
+            gt_test_shortened_series=test_univariate
           )
-      )
+      )  
   return output
