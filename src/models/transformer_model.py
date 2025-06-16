@@ -158,7 +158,7 @@ def execute_transformer_workflow(
           X.append(seq)
           y.append(target) 
 
-      X = torch.tensor(X, dtype=torch.float32)
+      X = torch.tensor(np.array(X), dtype=torch.float32)
       y = torch.tensor(np.array(y), dtype=torch.float32)  
       
       # z-score normalization
