@@ -96,7 +96,7 @@ def execute_kalman_workflow(
   if verbose:
       print(f"Split sizes — train: {len(train_univariate)}, dev: {len(dev_univariate)}, test: {len(test_univariate)}")
       
-  beta_t_train = kalman_filter_regression(
+  beta_t_train = - kalman_filter_regression(
       kalman_filter_average(train_multivariate[col_s1],
                             transition_cov=trans_cov_avg,
                             obs_cov=obs_cov_avg),
@@ -109,7 +109,7 @@ def execute_kalman_workflow(
   forecast_train_raw = train_multivariate[col_s1] + train_multivariate[col_s2] * beta_t_train # merely used for scaling dev without lookahead bias
       
   # get dev forecasts
-  beta_t_dev = kalman_filter_regression(
+  beta_t_dev = - kalman_filter_regression(
       kalman_filter_average(dev_multivariate[col_s1],
                             transition_cov=trans_cov_avg,
                             obs_cov=obs_cov_avg),
@@ -123,7 +123,7 @@ def execute_kalman_workflow(
   forecast_dev = (forecast_dev_raw - forecast_train_raw.mean()) / forecast_train_raw.std()
 
   # get test forecasts
-  beta_t_test = kalman_filter_regression(
+  beta_t_test = - kalman_filter_regression(
       kalman_filter_average(test_multivariate[col_s1],
                             transition_cov=trans_cov_avg,
                             obs_cov=obs_cov_avg),
@@ -135,6 +135,19 @@ def execute_kalman_workflow(
   )[:, 0]
   forecast_test_raw = test_multivariate[col_s1] + test_multivariate[col_s2] * beta_t_test
   forecast_test = (forecast_test_raw - forecast_dev_raw.mean()) / forecast_dev_raw.std()
+  
+  beta_t_full = - kalman_filter_regression(
+      kalman_filter_average(pairs_timeseries[col_s1],
+                            transition_cov=trans_cov_avg,
+                            obs_cov=obs_cov_avg),
+      kalman_filter_average(pairs_timeseries[col_s2],
+                            transition_cov=trans_cov_avg,
+                            obs_cov=obs_cov_avg),
+      delta=delta,
+      obs_cov=obs_cov_reg
+  )[:, 0]
+  forecast_full_raw = pairs_timeseries[col_s1] + pairs_timeseries[col_s2] * beta_t_full
+  forecast_full = (forecast_full_raw - forecast_full_raw.mean()) / forecast_full_raw.std()
 
   if look_back == 1:
       # Calculate mse values
@@ -199,7 +212,10 @@ pair_tup_str: {pair_tup_str}
           dict(
             pairs_timeseries=pairs_timeseries,
             test_s1_shortened=test_s1, 
-            test_s2_shortened=test_s2, 
+            test_s2_shortened=test_s2,
+            forecast_train=(forecast_train_raw - forecast_train_raw.mean()) / forecast_train_raw.std(), 
+            forecast_dev=forecast_dev,
+            forecast_old_method=forecast_full, # has lookahead bias
             forecast_test_shortened_series=forecast_test, 
             gt_test_shortened_series=test_univariate
           )
