@@ -380,6 +380,7 @@ pair_tup_str: {pair_tup_str}
   if return_datasets:
       output.update(
           dict(
+            pairs_timeseries=pairs_timeseries,
             test_s1_shortened=test_s1_shortened, 
             test_s2_shortened=test_s2_shortened, 
             forecast_test_shortened_series=forecast_test_shortened_series, 
