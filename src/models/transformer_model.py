@@ -323,11 +323,8 @@ def execute_transformer_workflow(
   test_nmse = test_mse_after_inverse / test_var
 
   # maybe too much explanation here, but y_hat and y_true respectively represent the predicted and ground truth values
-  y_hat_scaled = np.concatenate(test_preds_scaled).reshape(-1, 1)
-  y_true_scaled = np.concatenate(test_targets_scaled).reshape(-1, 1)
-
-  y_hat = y_hat_scaled * dev_std + dev_mean
-  y_true = y_true_scaled * dev_std + dev_mean
+  y_hat = np.concatenate(test_preds_original_scale).reshape(-1, 1)
+  y_true = np.concatenate(test_targets_original_scale).reshape(-1, 1)
 
   ## Trading
   test_s1_shortened = test_multivariate[col_s1].iloc[look_back:]
@@ -335,6 +332,11 @@ def execute_transformer_workflow(
   test_index_shortened = test_multivariate.index[look_back:] # officially doesn't really matter whether to use `test_multivariate` or `test`, but do it like this for consistency
   forecast_test_shortened_series = pd.Series(y_hat.squeeze(), index=test_index_shortened)
   gt_test_shortened_series = pd.Series(y_true.squeeze(), index=test_index_shortened)
+  
+  dev_index_shortened = dev_multivariate.index[look_back:]
+  forecast_dev_shortened_series = pd.Series((val_preds_original_scale).reshape(-1, 1).squeeze(), index=dev_index_shortened)
+  gt_dev_shortened_series = pd.Series((val_targets_original_scale).reshape(-1, 1).squeeze(), index=dev_index_shortened)
+  
 
   output = get_gt_yoy_returns_test_dev(pairs_timeseries, dev_frac, train_frac, look_back=20, yearly_trading_days=yearly_trading_days)
   gt_yoy, gt_yoy_for_dev_dataset = output['gt_yoy_test'], output['gt_yoy_dev']
@@ -380,9 +382,12 @@ pair_tup_str: {pair_tup_str}
   if return_datasets:
       output.update(
           dict(
+            train_multivariate=train_multivariate,
             pairs_timeseries=pairs_timeseries,
             test_s1_shortened=test_s1_shortened, 
             test_s2_shortened=test_s2_shortened, 
+            gt_dev_shortened_series=gt_dev_shortened_series,
+            forecast_dev_shortened_series=forecast_dev_shortened_series,
             forecast_test_shortened_series=forecast_test_shortened_series, 
             gt_test_shortened_series=gt_test_shortened_series
           )
